@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EH</title>
+<style>
+  :root {
+    --bg: #17181c;
+    --panel: #202127;
+    --line: #2e3038;
+    --text: #e6e6e6;
+    --dim: #8b8f9a;
+    --accent: #7aa2f7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.7 -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  #state { font-size: 12px; color: var(--dim); }
+  #state.running { color: var(--accent); }
+  main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 128px 68px 1fr;
+    gap: 8px;
+    padding: 3px 0;
+    align-items: start;
+  }
+  .time { color: var(--dim); font-variant-numeric: tabular-nums; font-size: 12px; padding-top: 2px; }
+  .src { font-size: 12px; }
+  .src.外界消息 { color: #9ece6a; }
+  .src.内心活动 { color: #bb9af7; }
+  .src.工具调用 { color: #e0af68; }
+  .src.工具返回 { color: #7dcfff; }
+  .text { white-space: pre-wrap; word-break: break-word; }
+  #live {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-left: 2px solid var(--accent);
+    background: #1c1e24;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #live:empty { display: none; }
+  footer {
+    display: flex;
+    gap: 8px;
+    padding: 10px 16px;
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+  }
+  #input {
+    flex: 1;
+    resize: none;
+    height: 44px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #15161a;
+    color: var(--text);
+    font: inherit;
+    outline: none;
+  }
+  #input:focus { border-color: var(--accent); }
+  #send {
+    width: 88px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #10131a;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #send:disabled { opacity: .5; cursor: default; }
+</style>
+</head>
+<body>
+<header>
+  <h1>EH</h1>
+  <span id="state">连接中…</span>
+</header>
+
+<main id="list"></main>
+
+<footer>
+  <textarea id="input" placeholder="跟她说点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+  <button id="send">发送</button>
+</footer>
+
+<script type="module">
+const list = document.getElementById('list')
+const live = document.getElementById('live')
+const stateEl = document.getElementById('state')
+const input = document.getElementById('input')
+const sendBtn = document.getElementById('send')
+
+let running = false
+
+function row(entry) {
+  const div = document.createElement('div')
+  div.className = 'row'
+
+  const time = document.createElement('div')
+  time.className = 'time'
+  time.textContent = entry.t
+
+  const src = document.createElement('div')
+  src.className = 'src ' + entry.src
+  src.textContent = entry.src
+
+  const text = document.createElement('div')
+  text.className = 'text'
+  text.textContent = entry.text
+
+  div.append(time, src, text)
+  return div
+}
+
+async function reload() {
+  const entries = await (await fetch('/history')).json()
+  list.replaceChildren(...entries.map(row))
+  list.scrollTop = list.scrollHeight
+}
+
+function setState(state) {
+  running = state === 'running'
+  stateEl.textContent = running ? '运行中…' : '空闲'
+  stateEl.className = running ? 'running' : ''
+}
+
+function ensureLive() {
+  if (!live.isConnected) list.append(live)
+  list.scrollTop = list.scrollHeight
+}
+
+const events = new EventSource('/events')
+
+events.onmessage = event => {
+  const data = JSON.parse(event.data)
+  if (data.type === 'state') {
+    setState(data.state)
+    if (data.state === 'idle') live.textContent = ''
+  }
+  if (data.type === 'text') {
+    ensureLive()
+    live.textContent += data.piece
+    list.scrollTop = list.scrollHeight
+  }
+  if (data.type === 'done' || data.type === 'history') {
+    live.textContent = ''
+    reload()
+  }
+  if (data.type === 'error') {
+    ensureLive()
+    live.textContent += '\n[出错] ' + data.message
+  }
+}
+
+async function send() {
+  const text = input.value.trim()
+  if (!text) return
+  input.value = ''
+  const res = await fetch('/say', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  if (!res.ok) {
+    const info = await res.json().catch(() => ({}))
+    alert(info.error ?? '发送失败')
+  }
+}
+
+sendBtn.addEventListener('click', send)
+input.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    send()
+  }
+})
+
+reload()
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "eh",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Elio Harness",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "ping": "node scripts/ping.ts",
+    "start": "node src/main.ts"
+  }
+}
