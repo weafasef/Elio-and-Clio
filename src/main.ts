@@ -1,6 +1,7 @@
 import { loadConfig } from './config.ts'
 import './tools/memo.ts'
 import './tools/sleep.ts'
+import './tools/alarms.ts'
 import { startServer } from './web/server.ts'
 
 const config = loadConfig()

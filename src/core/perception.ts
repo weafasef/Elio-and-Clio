@@ -17,6 +17,13 @@ export type PerceptionInput = {
   lastActivityAt?: Date
   /** 现在（测试时可以传固定值） */
   now?: Date
+  /**
+   * 外面递进来的占位符取值，例如 { alarm: "12 分钟后…" }。
+   *
+   * 走这里的东西（闹钟、以后的日历…）都由调用方算好，
+   * 感知缓存只负责把字符串塞进 {{占位符}}，不关心它们从哪来。
+   */
+  provided?: Record<string, string>
 }
 
 /** 配置里的形状 */
@@ -69,13 +76,15 @@ function collectValues(input: PerceptionInput): Record<string, string> {
   return {
     time: `${formatDate(now)} ${WEEKDAYS[now.getDay()]} ${formatClock(now)}`,
     elapsed: formatElapsed(now, input.lastActivityAt),
-    // 闹钟还没实现
+    // 默认「无」；外面递进来的（比如闹钟）会覆盖它
     alarm: '无',
     wake: input.wakeSource,
     usage: used === undefined || percent === undefined
       ? '无'
       : `${percent}%。${used}/${input.windowTokens} token`,
     memo: readMemo(input.dataDir),
+    // 外面递进来的最后展开，同名覆盖上面的默认值
+    ...input.provided,
   }
 }
 

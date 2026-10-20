@@ -14,6 +14,8 @@ export type AssembleInput = {
   windowTokens: number
   /** 上一步结束的时间 */
   lastActivityAt?: Date
+  /** 外面递进来的占位符取值，透传给感知缓存 */
+  provided?: Record<string, string>
 }
 
 /**
@@ -43,6 +45,7 @@ export function assemble(input: AssembleInput): StreamRequest {
       usedTokens: input.usedTokens,
       windowTokens: input.windowTokens,
       lastActivityAt: input.lastActivityAt,
+      provided: input.provided,
     }),
   })
 

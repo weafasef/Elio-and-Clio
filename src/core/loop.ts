@@ -18,6 +18,13 @@ export type StepEvents = {
   onLoopStart?: (loop: number) => void
   /** 每执行一个工具时 */
   onToolCall?: (name: string) => void
+  /**
+   * 给感知缓存的占位符取值（比如闹钟）。
+   *
+   * 每轮都会调一次，所以里面的数字是"此刻"的。
+   * 返回 { alarm: "12 分钟后…" } 这种字典，core 不关心内容。
+   */
+  perception?: () => Record<string, string>
   /** 本步结束 */
   onDone?: () => void
 }
@@ -57,6 +64,8 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
         usedTokens,
         windowTokens: config.contextWindow,
         lastActivityAt,
+        // 每轮现算（闹钟剩余时间会变）
+        provided: events.perception?.(),
       })
 
       let result
