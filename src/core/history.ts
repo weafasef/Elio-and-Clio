@@ -9,6 +9,10 @@ export type Entry = {
   t: string
   src: EntrySource
   text: string
+  /** 第几步（网页分组用，不进渲染） */
+  step?: number
+  /** 这一步的第几轮（网页分组用，不进渲染） */
+  loop?: number
 }
 
 /** 历史文件位置 */
@@ -27,12 +31,26 @@ export function stamp(date = new Date()): string {
 }
 
 /** 追加一行。文件不存在会自动建（含目录）。 */
-export function appendHistory(dataDir: string, src: EntrySource, text: string): Entry {
-  const entry: Entry = { t: stamp(), src, text }
+export function appendHistory(
+  dataDir: string,
+  src: EntrySource,
+  text: string,
+  extra: { step?: number, loop?: number } = {},
+): Entry {
+  const entry: Entry = { t: stamp(), src, text, ...extra }
   const file = historyFile(dataDir)
   mkdirSync(dirname(file), { recursive: true })
   appendFileSync(file, JSON.stringify(entry) + '\n', 'utf8')
   return entry
+}
+
+/** 下一步的编号：历史里最大的 step + 1；没有历史就是 1 */
+export function nextStep(dataDir: string): number {
+  let max = 0
+  for (const entry of readHistory(dataDir)) {
+    if (typeof entry.step === 'number' && entry.step > max) max = entry.step
+  }
+  return max + 1
 }
 
 /** 读全部记录（坏行跳过，不让一行坏数据拖垮整个历史） */
@@ -68,7 +86,12 @@ export function readHistory(dataDir: string): Entry[] {
  * 历史为空时返回空字符串（调用方会把这条消息整个省掉）。
  */
 export function renderHistory(dataDir: string): string {
-  return readHistory(dataDir)
+  return renderEntries(readHistory(dataDir))
+}
+
+/** 把一组记录渲染成文本（回看 trace 时按条数截取用） */
+export function renderEntries(entries: Entry[]): string {
+  return entries
     .map(entry => `${entry.t}  ${entry.src}  ${entry.text}`)
     .join('\n')
 }

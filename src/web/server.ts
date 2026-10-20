@@ -3,7 +3,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { appendHistory, readHistory } from '../core/history.ts'
+import { appendHistory, nextStep, readHistory, renderEntries } from '../core/history.ts'
+import { findTrace } from '../core/trace.ts'
 import { runStep } from '../core/loop.ts'
 import type { Config } from '../config.ts'
 
@@ -51,12 +52,14 @@ export function startServer(config: Config): ServerHandle {
     try {
       while (queue.length > 0) {
         const batch = queue.splice(0, queue.length)
+        const stepId = nextStep(config.dataDir)
         for (const text of batch) {
-          appendHistory(config.dataDir, '外界消息', text)
+          appendHistory(config.dataDir, '外界消息', text, { step: stepId })
         }
         broadcast({ type: 'history' })
 
         await runStep(config, {
+          stepId,
           wakeSource: '外界消息',
           onText: piece => broadcast({ type: 'text', piece }),
           onLoopStart: loop => broadcast({ type: 'loop', loop }),
@@ -104,6 +107,43 @@ export function startServer(config: Config): ServerHandle {
     if (req.method === 'GET' && path === '/history') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify(readHistory(config.dataDir)))
+      return
+    }
+
+    // 某一次的请求 + 响应
+    if (req.method === 'GET' && path === '/trace') {
+      const step = Number(url.searchParams.get('step'))
+      const loop = Number(url.searchParams.get('loop'))
+      const record = Number.isFinite(step) && Number.isFinite(loop)
+        ? findTrace(config.dataDir, step, loop)
+        : null
+
+      if (!record) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: '没有这条记录' }))
+        return
+      }
+
+      // 重建当时的 messages：历史按条数取，感知缓存用存下来的
+      const entries = readHistory(config.dataDir).slice(0, record.historyCount)
+      const historyText = renderEntries(entries)
+      const messages: Array<{ role: 'user', content: string }> = []
+      if (historyText) messages.push({ role: 'user', content: historyText })
+      messages.push({ role: 'user', content: record.perception })
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({
+        t: record.t,
+        step: record.step,
+        loop: record.loop,
+        system: record.system,
+        tools: record.tools,
+        messages,
+        response: record.response,
+        historyCount: record.historyCount,
+        // 历史被压缩过、条数不够时提示一下
+        historyShort: entries.length < record.historyCount,
+      }))
       return
     }
 
