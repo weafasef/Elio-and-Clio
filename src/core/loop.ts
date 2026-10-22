@@ -1,6 +1,7 @@
 import { assemble } from './assemble.ts'
 import { formatToolCall } from './format.ts'
 import { appendHistory, readHistory, stamp } from './history.ts'
+import type { EntrySource } from './history.ts'
 import type { WakeSource } from './perception.ts'
 import { saveTrace } from './trace.ts'
 import { runTool } from '../registries/tools.ts'
@@ -25,6 +26,13 @@ export type StepEvents = {
    * 返回 { alarm: "12 分钟后…" } 这种字典，core 不关心内容。
    */
   perception?: () => Record<string, string>
+  /**
+   * 每一轮开始前，把排队的东西取走（跟 perception 一样是回调）。
+   *
+   * 主人说的话、到点的闹钟都从这里进来 —— 不用等这一步结束。
+   * 返回的内容会写进历史，这一轮的请求就带上了。
+   */
+  takeQueued?: () => Array<{ src: EntrySource, text: string }>
   /** 本步结束 */
   onDone?: () => void
 }
@@ -57,6 +65,17 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
     while (true) {
       loop++
       events.onLoopStart?.(loop)
+
+      // 排队进来的东西：主人说的话、到点的闹钟，下一轮就带上
+      const queued = events.takeQueued?.() ?? []
+      if (queued.length > 0) {
+        for (const item of queued) {
+          appendHistory(dataDir, item.src, item.text, { step: stepId, loop })
+        }
+        if (queued.some(item => item.src === '外界消息')) {
+          wakeSource = '外界消息'
+        }
+      }
 
       const request = assemble({
         dataDir,

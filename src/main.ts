@@ -2,6 +2,8 @@ import { loadConfig } from './config.ts'
 import './tools/memo.ts'
 import './tools/sleep.ts'
 import './tools/alarms.ts'
+// import './tools/next.ts'     ← 先不注册（读书）
+import './tools/history.ts'
 import { startServer } from './web/server.ts'
 
 const config = loadConfig()

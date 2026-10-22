@@ -16,6 +16,12 @@ export type Config = {
   dataDir: string
   /** 网页端口 */
   port: number
+  /** 记忆库地址（Hindsight），例如 http://127.0.0.1:8888 */
+  memoryUrl: string
+  /** 记忆库里的 bank */
+  memoryBank: string
+  /** next 工具读的书（按 ===== NNN 标题 ===== 切章） */
+  bookFile?: string
   /** 流式传输时，多久收不到数据就掐断（毫秒） */
   idleTimeoutMs: number
   /** 连接类错误最多试几次 */
@@ -28,6 +34,8 @@ const DEFAULTS: Config = {
   contextWindow: 131072,
   dataDir: join(homedir(), '.eh', 'individuals', 'elio'),
   port: 8099,
+  memoryUrl: 'http://127.0.0.1:8888',
+  memoryBank: 'elio',
   idleTimeoutMs: 60_000,
   maxRetries: 3,
 }
@@ -55,5 +63,8 @@ export function loadConfig(): Config {
     model: process.env.EH_MODEL ?? fromFile.model ?? DEFAULTS.model,
     apiKey: process.env.EH_API_KEY ?? fromFile.apiKey,
     port: envPort ? Number(envPort) : (fromFile.port ?? DEFAULTS.port),
+    memoryUrl: process.env.EH_MEMORY_URL ?? fromFile.memoryUrl ?? DEFAULTS.memoryUrl,
+    memoryBank: process.env.EH_MEMORY_BANK ?? fromFile.memoryBank ?? DEFAULTS.memoryBank,
+    bookFile: process.env.EH_BOOK_FILE ?? fromFile.bookFile,
   }
 }

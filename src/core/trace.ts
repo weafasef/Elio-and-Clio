@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Usage } from '../model.ts'
 
@@ -61,4 +61,50 @@ export function findTrace(dataDir: string, step: number, loop: number): TraceRec
     }
   }
   return null
+}
+
+/**
+ * 历史被压缩之后，把旧 trace 的 historyCount 跟着调整。
+ *
+ * 压缩是从 firstIndex 开始删掉 removed 条、插入 1 条：
+ * 只有"用到了 firstIndex 之后那些行"的记录需要改，其它不受影响。
+ */
+export function shiftTraceHistoryCounts(
+  dataDir: string,
+  firstIndex: number,
+  removed: number,
+  inserted = 1,
+): void {
+  const file = traceFile(dataDir)
+  let raw: string
+  try {
+    raw = readFileSync(file, 'utf8')
+  } catch {
+    return
+  }
+
+  const delta = inserted - removed
+  const lines = raw.split('\n')
+  let changed = false
+
+  const next = lines.map(line => {
+    if (!line.trim()) return line
+    try {
+      const record = JSON.parse(line) as TraceRecord
+      if (typeof record.historyCount === 'number' && record.historyCount > firstIndex) {
+        record.historyCount = Math.max(firstIndex + inserted, record.historyCount + delta)
+        changed = true
+        return JSON.stringify(record)
+      }
+    } catch {
+      // 坏行原样保留
+    }
+    return line
+  })
+
+  if (!changed) return
+
+  const tmp = file + '.tmp'
+  writeFileSync(tmp, next.join('\n'), 'utf8')
+  renameSync(tmp, file)
 }
