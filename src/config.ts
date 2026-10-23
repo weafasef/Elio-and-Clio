@@ -2,6 +2,17 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+/** 语音合成（Fish Audio） */
+export type TtsConfig = {
+  serverUrl: string
+  apiKey: string
+  referenceId?: string
+  model?: string
+  format?: string
+  latency?: string
+  proxyUrl?: string
+}
+
 /** eh 的配置。默认值写在代码里，可以被 ~/.eh/config.json 和环境变量覆盖。 */
 export type Config = {
   /** 模型服务地址（OpenAI 兼容），例如 http://127.0.0.1:8096/v1 */
@@ -22,6 +33,8 @@ export type Config = {
   memoryBank: string
   /** next 工具读的书（按 ===== NNN 标题 ===== 切章） */
   bookFile?: string
+  /** 语音合成；不配就不出声 */
+  tts?: TtsConfig
   /** 流式传输时，多久收不到数据就掐断（毫秒） */
   idleTimeoutMs: number
   /** 连接类错误最多试几次 */
