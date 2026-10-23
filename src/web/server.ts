@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { appendHistory, nextStep, readHistory, renderEntries } from '../core/history.ts'
+import { appendHistory, deleteHistoryLoop, nextStep, readHistory, renderEntries } from '../core/history.ts'
 import { findTrace } from '../core/trace.ts'
 import { runStep } from '../core/loop.ts'
 import { dueAlarms, nextAlarmText, readAlarms, removeAlarms } from '../tools/alarms.ts'
@@ -31,6 +31,8 @@ export function startServer(config: Config): ServerHandle {
   const queue: Array<{ src: '外界消息' | '工具返回', text: string }> = []
   let busy = false
   let state: 'idle' | 'running' = 'idle'
+  /** 当前这一步的中止开关（网页上的「停止」） */
+  let abort: AbortController | undefined
   /** 下一个闹钟的定时器 */
   let timer: NodeJS.Timeout | undefined
 
@@ -85,10 +87,13 @@ export function startServer(config: Config): ServerHandle {
   const kick = async () => {
     if (busy) return
     busy = true
+    const controller = new AbortController()
+    abort = controller
     setState('running')
 
     try {
       while (queue.length > 0) {
+        if (controller.signal.aborted) break
         const batch = queue.splice(0, queue.length)
         const stepId = nextStep(config.dataDir)
         // 一批里只要有人说话，就算「外界消息」把她叫醒的
@@ -118,13 +123,18 @@ export function startServer(config: Config): ServerHandle {
           onToolCall: name => broadcast({ type: 'tool', name }),
           // 每写一条历史就刷新页面，不用等整步结束
           onHistory: () => broadcast({ type: 'history' }),
+          signal: controller.signal,
         })
         broadcast({ type: 'done' })
+        if (controller.signal.aborted) break
       }
     } catch (error) {
-      broadcast({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+      if (!controller.signal.aborted) {
+        broadcast({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+      }
     } finally {
       busy = false
+      abort = undefined
       setState('idle')
       schedule()
     }
@@ -228,6 +238,48 @@ export function startServer(config: Config): ServerHandle {
         clearInterval(ping)
         clients.delete(res)
       })
+      return
+    }
+
+    // 停止当前这一步
+    if (req.method === 'POST' && path === '/stop') {
+      const stopped = !!busy && !!abort
+      abort?.abort()
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ ok: true, stopped }))
+      return
+    }
+
+    // 删除一个 loop 的全部历史（档案不动）
+    if (req.method === 'POST' && path === '/history/delete') {
+      if (busy) {
+        res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: '正在运行，先停止' }))
+        return
+      }
+
+      const body = await readBody(req)
+      let step = NaN
+      let loop = NaN
+      try {
+        const parsed = JSON.parse(body) as { step?: unknown, loop?: unknown }
+        if (typeof parsed.step === 'number') step = parsed.step
+        if (typeof parsed.loop === 'number') loop = parsed.loop
+      } catch {
+        // 下面统一报错
+      }
+
+      if (!Number.isInteger(step) || !Number.isInteger(loop)) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: 'step 和 loop 要是整数' }))
+        return
+      }
+
+      const removed = deleteHistoryLoop(config.dataDir, step, loop)
+      broadcast({ type: 'history' })
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ ok: true, removed }))
       return
     }
 

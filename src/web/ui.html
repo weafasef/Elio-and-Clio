@@ -35,6 +35,7 @@
   #state { font-size: 12px; color: var(--dim); }
   #state.running { color: var(--accent); }
 
+
   main {
     flex: 1;
     overflow-y: auto;
@@ -75,6 +76,8 @@
     cursor: pointer;
   }
   .trace-btn:hover { border-color: var(--accent); }
+  .trace-btn.delete { color: #ff8a8a; }
+  .trace-btn.delete:hover { border-color: #ff8a8a; }
 
   .row {
     display: grid;
@@ -122,6 +125,17 @@
     outline: none;
   }
   #input:focus { border-color: var(--accent); }
+  #stop {
+    width: 64px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #1e2330;
+    color: var(--text);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #stop:hover:not(:disabled) { background: #262d3d; }
+  #stop:disabled { opacity: .35; cursor: default; }
   #send {
     width: 88px;
     border: 0;
@@ -185,6 +199,7 @@
 
 <footer>
   <textarea id="input" placeholder="跟她说点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+  <button id="stop" disabled>停止</button>
   <button id="send">发送</button>
 </footer>
 
@@ -206,6 +221,7 @@ const drawer = document.getElementById('drawer')
 const drawerTitle = document.getElementById('drawer-title')
 const drawerBody = document.getElementById('drawer-body')
 const drawerClose = document.getElementById('drawer-close')
+const stopBtn = document.getElementById('stop')
 
 let running = false
 
@@ -249,11 +265,18 @@ function render(entries) {
       loopBlock = el('div', 'loop')
       const head = el('div', 'loop-head')
       head.append(document.createTextNode(`loop ${thisLoop}`))
-      if (typeof entry.step === 'number' && thisLoop > 0) {
-        const btn = el('button', 'trace-btn')
-        btn.textContent = '查看请求'
-        btn.addEventListener('click', () => openTrace(entry.step, thisLoop))
-        head.append(btn)
+      if (typeof entry.step === 'number') {
+        if (thisLoop > 0) {
+          const btn = el('button', 'trace-btn')
+          btn.textContent = '查看请求'
+          btn.addEventListener('click', () => openTrace(entry.step, thisLoop))
+          head.append(btn)
+        }
+        const del = el('button', 'trace-btn delete')
+        del.textContent = '删'
+        del.title = `删除 step ${entry.step} · loop ${thisLoop} 的全部记录`
+        del.addEventListener('click', () => deleteLoop(entry.step, thisLoop, del))
+        head.append(del)
       }
       loopBlock.append(head)
       stepBlock.append(loopBlock)
@@ -291,6 +314,7 @@ function setState(state) {
   running = state === 'running'
   stateEl.textContent = running ? '运行中…' : '空闲'
   stateEl.className = running ? 'running' : ''
+  stopBtn.disabled = !running
 }
 
 function ensureLive() {
@@ -391,6 +415,29 @@ input.addEventListener('keydown', event => {
     send()
   }
 })
+
+stopBtn.addEventListener('click', async () => {
+  stopBtn.disabled = true
+  stateEl.textContent = '停止中…'
+  await fetch('/stop', { method: 'POST' })
+})
+
+async function deleteLoop(step, loop, button) {
+  if (!confirm(`删除 step ${step} · loop ${loop} 的全部记录？`)) return
+  button.disabled = true
+  const res = await fetch('/history/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ step, loop }),
+  })
+  if (!res.ok) {
+    const info = await res.json().catch(() => ({}))
+    alert(info.error ?? '删除失败')
+    button.disabled = false
+    return
+  }
+  scheduleReload()
+}
 
 reload()
 </script>

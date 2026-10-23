@@ -37,6 +37,8 @@ export type StepEvents = {
   takeQueued?: () => Array<{ src: EntrySource, text: string }>
   /** 本步结束 */
   onDone?: () => void
+  /** 外部喊停（网页上的「停止」） */
+  signal?: AbortSignal
 }
 
 /**
@@ -75,6 +77,7 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
 
   try {
     while (true) {
+      if (events.signal?.aborted) break
       loop++
       events.onLoopStart?.(loop)
 
@@ -101,8 +104,16 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
 
       let result
       try {
-        result = await streamChat(request, { onText: events.onText }, { config })
+        result = await streamChat(
+          request,
+          { onText: events.onText },
+          { config, signal: events.signal },
+        )
       } catch (error) {
+        if (events.signal?.aborted) {
+          log('工具返回', '已停止', { step: stepId, loop })
+          break
+        }
         const message = error instanceof Error ? error.message : String(error)
         log('工具返回', `请求失败：${message}`, { step: stepId, loop })
         break
@@ -141,6 +152,7 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
       // 逐个执行工具
       let shouldStop = false
       for (const call of result.toolCalls) {
+        if (events.signal?.aborted) break
         events.onToolCall?.(call.name)
         log('工具调用', formatToolCall(call.name, call.args), { step: stepId, loop })
         const output = await runTool(call.name, call.args, { dataDir })
@@ -151,6 +163,7 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
       // 之后每一轮都是"工具返回"把我推进来的
       wakeSource = '工具返回'
 
+      if (events.signal?.aborted) break
       if (shouldStop) break
     }
   } finally {

@@ -55,6 +55,17 @@ export function nextStep(dataDir: string): number {
   return max + 1
 }
 
+/** 删除一个 loop 的全部记录，返回删了几条（档案不动） */
+export function deleteHistoryLoop(dataDir: string, step: number, loop: number): number {
+  const entries = readHistory(dataDir)
+  const kept = entries.filter(
+    entry => !(entry.step === step && (entry.loop ?? 0) === loop),
+  )
+  if (kept.length === entries.length) return 0
+  writeAll(dataDir, kept)
+  return entries.length - kept.length
+}
+
 /** 读全部记录（坏行跳过，不让一行坏数据拖垮整个历史） */
 export function readHistory(dataDir: string): Entry[] {
   let raw: string
