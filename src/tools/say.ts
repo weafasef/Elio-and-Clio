@@ -131,7 +131,8 @@ registerTool({
   description:
     '对主人说一句话。会显示在网页里，同时用我的声音念出来。' +
     '话里只用逗号、句号、问号、感叹号、顿号这五种标点，其他符号一律不要。' +
-    '一次说短一点；长了就分成几次。不想出声只写内心活动，不要调用它。',
+    '一次说短一点；长了就分成几次。不想出声只写内心活动，不要调用它。' +
+    '返回「成功」只表示工具执行成功，不是主人说的话。',
   parameters: {
     type: 'object',
     properties: {
@@ -162,6 +163,6 @@ registerTool({
     const path = await synthesize(text, config, dir)
     enqueue(path, dir)
 
-    return `说了：${text.length > 40 ? text.slice(0, 40) + '…' : text}`
+    return '成功'
   },
 })

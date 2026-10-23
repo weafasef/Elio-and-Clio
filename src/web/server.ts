@@ -35,11 +35,15 @@ export function startServer(config: Config): ServerHandle {
   let timer: NodeJS.Timeout | undefined
 
   const send = (res: ServerResponse, event: unknown) => {
-    res.write(`data: ${JSON.stringify(event)}\n\n`)
+    try {
+      res.write(`data: ${JSON.stringify(event)}\n\n`)
+    } catch {
+      clients.delete(res)
+    }
   }
 
   const broadcast = (event: unknown) => {
-    for (const client of clients) send(client, event)
+    for (const client of [...clients]) send(client, event)
   }
 
   const setState = (next: 'idle' | 'running') => {
@@ -112,6 +116,8 @@ export function startServer(config: Config): ServerHandle {
             schedule()
           },
           onToolCall: name => broadcast({ type: 'tool', name }),
+          // 每写一条历史就刷新页面，不用等整步结束
+          onHistory: () => broadcast({ type: 'history' }),
         })
         broadcast({ type: 'done' })
       }
@@ -203,10 +209,25 @@ export function startServer(config: Config): ServerHandle {
         'Cache-Control': 'no-cache',
         Connection: 'keep-alive',
       })
+      res.flushHeaders?.()
       res.write('retry: 3000\n\n')
       clients.add(res)
       send(res, { type: 'state', state })
-      req.on('close', () => clients.delete(res))
+
+      // 心跳：防止代理/系统把长连接当死连接掐掉
+      const ping = setInterval(() => {
+        try {
+          res.write(': ping\n\n')
+        } catch {
+          clearInterval(ping)
+          clients.delete(res)
+        }
+      }, 15_000)
+
+      req.on('close', () => {
+        clearInterval(ping)
+        clients.delete(res)
+      })
       return
     }
 

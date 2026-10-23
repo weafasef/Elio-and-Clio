@@ -268,9 +268,23 @@ function render(entries) {
   list.scrollTop = list.scrollHeight
 }
 
+let reloadTimer = null
+let reloadSeq = 0
+
 async function reload() {
+  const seq = ++reloadSeq
   const entries = await (await fetch('/history')).json()
+  if (seq !== reloadSeq) return
   render(entries)
+}
+
+/** 短时间内的多次通知合成一次，避免重复请求、旧响应覆盖新响应 */
+function scheduleReload() {
+  if (reloadTimer) return
+  reloadTimer = setTimeout(() => {
+    reloadTimer = null
+    reload()
+  }, 120)
 }
 
 function setState(state) {
@@ -329,6 +343,11 @@ drawerClose.addEventListener('click', () => { drawer.hidden = true })
 
 const events = new EventSource('/events')
 
+events.onerror = () => {
+  stateEl.textContent = '重连中…'
+  stateEl.className = ''
+}
+
 events.onmessage = event => {
   const data = JSON.parse(event.data)
   if (data.type === 'state') {
@@ -342,7 +361,7 @@ events.onmessage = event => {
   }
   if (data.type === 'done' || data.type === 'history') {
     live.textContent = ''
-    reload()
+    scheduleReload()
   }
   if (data.type === 'error') {
     ensureLive()

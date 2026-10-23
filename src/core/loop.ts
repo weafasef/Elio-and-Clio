@@ -19,6 +19,8 @@ export type StepEvents = {
   onLoopStart?: (loop: number) => void
   /** 每执行一个工具时 */
   onToolCall?: (name: string) => void
+  /** 每往历史里写一条（网页用它实时刷新） */
+  onHistory?: () => void
   /**
    * 给感知缓存的占位符取值（比如闹钟）。
    *
@@ -61,6 +63,16 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
   let wakeSource: WakeSource = events.wakeSource
   let loop = 0
 
+  /** 写历史 + 通知网页 */
+  const log = (
+    src: EntrySource,
+    text: string,
+    extra: { step?: number, loop?: number } = {},
+  ) => {
+    appendHistory(dataDir, src, text, extra)
+    events.onHistory?.()
+  }
+
   try {
     while (true) {
       loop++
@@ -70,7 +82,7 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
       const queued = events.takeQueued?.() ?? []
       if (queued.length > 0) {
         for (const item of queued) {
-          appendHistory(dataDir, item.src, item.text, { step: stepId, loop })
+          log(item.src, item.text, { step: stepId, loop })
         }
         if (queued.some(item => item.src === '外界消息')) {
           wakeSource = '外界消息'
@@ -92,7 +104,7 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
         result = await streamChat(request, { onText: events.onText }, { config })
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        appendHistory(dataDir, '工具返回', `请求失败：${message}`, { step: stepId, loop })
+        log('工具返回', `请求失败：${message}`, { step: stepId, loop })
         break
       }
 
@@ -118,7 +130,7 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
 
       // 文字 → 内心活动
       if (result.text) {
-        appendHistory(dataDir, '内心活动', result.text, { step: stepId, loop })
+        log('内心活动', result.text, { step: stepId, loop })
       }
 
       // 没调任何工具 → 继续下一轮（只有 sleep 能结束）
@@ -130,9 +142,9 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
       let shouldStop = false
       for (const call of result.toolCalls) {
         events.onToolCall?.(call.name)
-        appendHistory(dataDir, '工具调用', formatToolCall(call.name, call.args), { step: stepId, loop })
+        log('工具调用', formatToolCall(call.name, call.args), { step: stepId, loop })
         const output = await runTool(call.name, call.args, { dataDir })
-        appendHistory(dataDir, '工具返回', output, { step: stepId, loop })
+        log('工具返回', output, { step: stepId, loop })
         if (call.name === 'sleep') shouldStop = true
       }
 
