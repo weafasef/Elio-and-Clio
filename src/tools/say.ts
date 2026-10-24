@@ -3,6 +3,7 @@ import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'nod
 import { join } from 'node:path'
 import { registerTool } from '../registries/tools.ts'
 import { loadConfig, type TtsConfig } from '../config.ts'
+import { finishSpeech, queueSpeech, startSpeech } from '../core/speech.ts'
 
 /**
  * 说话：把一句话交给 Fish Audio 合成，然后在本机播放。
@@ -93,9 +94,6 @@ async function synthesize(text: string, config: TtsConfig, dir: string): Promise
   return outputPath
 }
 
-/** 播放串行：一条念完再念下一条 */
-let playback: Promise<void> = Promise.resolve()
-
 function play(path: string): Promise<void> {
   return new Promise(resolve => {
     const child = spawn('afplay', [path], { stdio: 'ignore' })
@@ -119,11 +117,44 @@ function prune(dir: string): void {
   }
 }
 
-function enqueue(path: string, dir: string): void {
-  playback = playback
-    .then(() => play(path))
-    .then(() => prune(dir))
-    .catch(() => undefined)
+type SayItem = {
+  id: number
+  text: string
+  path: string
+  dir: string
+}
+
+const queue: SayItem[] = []
+let nextId = 1
+let pumping = false
+
+/** 入队后串行播放；开始/结束时同步给感知缓存 */
+function enqueue(text: string, path: string, dir: string): void {
+  const item: SayItem = { id: nextId++, text, path, dir }
+  queue.push(item)
+  queueSpeech(item.id, item.text)
+  void pump().catch(() => undefined)
+}
+
+async function pump(): Promise<void> {
+  if (pumping) return
+  pumping = true
+
+  try {
+    while (queue.length > 0) {
+      const item = queue.shift()!
+      startSpeech(item.id, item.text)
+      try {
+        await play(item.path)
+      } finally {
+        finishSpeech(item.id)
+        // 等整条队列播完再清理，避免删掉还没播的文件
+        if (queue.length === 0) prune(item.dir)
+      }
+    }
+  } finally {
+    pumping = false
+  }
 }
 
 registerTool({
@@ -161,7 +192,7 @@ registerTool({
 
     const dir = ttsDir(ctx.dataDir)
     const path = await synthesize(text, config, dir)
-    enqueue(path, dir)
+    enqueue(text, path, dir)
 
     return '成功'
   },

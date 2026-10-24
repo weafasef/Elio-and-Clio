@@ -4,6 +4,7 @@ import { appendHistory, readHistory, stamp } from './history.ts'
 import type { EntrySource } from './history.ts'
 import type { WakeSource } from './perception.ts'
 import { saveTrace } from './trace.ts'
+import { recordCall } from './metrics.ts'
 import { runTool } from '../registries/tools.ts'
 import { streamChat } from '../model.ts'
 import type { Config } from '../config.ts'
@@ -121,6 +122,13 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
 
       // 下一次感知缓存里的占用率，用这一次实际用了多少
       usedTokens = result.usage?.prompt ?? usedTokens
+
+      // 首 token / 速度统计，给下一轮的感知缓存看
+      recordCall(dataDir, {
+        firstTokenMs: result.ms.firstToken,
+        totalMs: result.ms.total,
+        completionTokens: result.usage?.completion ?? null,
+      })
 
       // 落一条 trace：只存"算不出来"的部分（历史按条数重建）
       const lastContent = request.messages.at(-1)?.content

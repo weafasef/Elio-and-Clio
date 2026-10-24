@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { formatFirstToken, formatTokenSpeed, readMetrics } from './metrics.ts'
+import { renderSpeechState } from './speech.ts'
 
 /** 唤醒来源（这一 step 是被什么开启的） */
 export type WakeSource = '外界消息' | '工具调用' | '工具返回' | '自由活动'
@@ -39,8 +41,11 @@ const DEFAULT_CONFIG: PerceptionConfig = {
     '- 当前时间：{{time}}（距上次活动 {{elapsed}}）',
     '- 下一个闹钟还有：{{alarm}}',
     '- 唤醒来源：{{wake}}',
+    '- 上次首 token：{{firstToken}}',
+    '- 上次速度：{{tokenSpeed}}',
     '- 上下文占用率：{{usage}}',
     '- 我的备忘录：{{memo}}',
+    '- 语音：{{speech}}',
   ],
 }
 
@@ -72,6 +77,7 @@ function collectValues(input: PerceptionInput): Record<string, string> {
   const now = input.now ?? new Date()
   const used = input.usedTokens
   const percent = used === undefined ? undefined : Math.round((used / input.windowTokens) * 100)
+  const metrics = readMetrics(input.dataDir)
 
   return {
     time: `${formatDate(now)} ${WEEKDAYS[now.getDay()]} ${formatClock(now)}`,
@@ -79,10 +85,13 @@ function collectValues(input: PerceptionInput): Record<string, string> {
     // 默认「无」；外面递进来的（比如闹钟）会覆盖它
     alarm: '无',
     wake: input.wakeSource,
+    firstToken: formatFirstToken(metrics),
+    tokenSpeed: formatTokenSpeed(metrics),
     usage: used === undefined || percent === undefined
       ? '无'
       : `${percent}%。${used}/${input.windowTokens} token`,
     memo: readMemo(input.dataDir),
+    speech: renderSpeechState(),
     // 外面递进来的最后展开，同名覆盖上面的默认值
     ...input.provided,
   }
