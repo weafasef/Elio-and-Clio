@@ -123,13 +123,29 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
       usedTokens = result.usage?.prompt ?? usedTokens
 
       // 落一条 trace：只存"算不出来"的部分（历史按条数重建）
+      const lastContent = request.messages.at(-1)?.content
+      const perceptionText = typeof lastContent === 'string'
+        ? lastContent
+        : (lastContent ?? [])
+            .filter(part => part.type === 'text')
+            .map(part => part.text)
+            .join('\n')
+
+      let perception = perceptionText
+      if (Array.isArray(lastContent) && lastContent.some(part => part.type === 'image_url')) {
+        const matched = /- 最近一次截图：(.+?)（(.+?)）/.exec(perceptionText)
+        perception += matched
+          ? `\n[截图 ${matched[2]} · ${matched[1]}]`
+          : '\n[截图]'
+      }
+
       saveTrace(dataDir, {
         t: stamp(),
         step: stepId,
         loop,
         historyCount: readHistory(dataDir).length,
         system: request.system ?? '',
-        perception: request.messages.at(-1)?.content ?? '',
+        perception,
         tools: (request.tools ?? []).map(tool => tool.name),
         response: {
           text: result.text,

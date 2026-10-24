@@ -5,8 +5,13 @@ import type { Config } from './config.ts'
 
 export type Role = 'system' | 'user' | 'assistant' | 'tool'
 
+/** 多模态消息里的一块内容 */
+export type ContentPart =
+  | { type: 'text', text: string }
+  | { type: 'image_url', image_url: { url: string } }
+
 /** 发给模型的一条消息 */
-export type Msg = { role: Role, content: string }
+export type Msg = { role: Role, content: string | ContentPart[] }
 
 /** 工具定义（工具表里的一项） */
 export type ToolSchema = {
@@ -195,6 +200,7 @@ async function attemptOnce(
     headers: {
       'Content-Type': 'application/json',
       ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+      ...(config.headers ?? {}),
     },
     body: JSON.stringify(payload),
     signal,

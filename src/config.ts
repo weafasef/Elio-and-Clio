@@ -21,6 +21,8 @@ export type Config = {
   apiKey?: string
   /** 模型名，要和 /v1/models 里的一致 */
   model: string
+  /** 额外的请求头（例如 OpenCode Go 的 User-Agent / x-opencode-session） */
+  headers?: Record<string, string>
   /** 模型窗口大小（一个 slot 的） */
   contextWindow: number
   /** 这个实例的数据目录 */

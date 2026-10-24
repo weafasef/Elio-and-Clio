@@ -6,6 +6,7 @@ import './tools/alarms.ts'
 import './tools/history.ts'
 import './tools/persona.ts'
 import './tools/say.ts'
+import './tools/screenshot.ts'
 import { startServer } from './web/server.ts'
 
 const config = loadConfig()
