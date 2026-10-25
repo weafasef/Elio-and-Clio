@@ -3,6 +3,7 @@ import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'nod
 import { join } from 'node:path'
 import { registerTool } from '../registries/tools.ts'
 import { loadConfig, type TtsConfig } from '../config.ts'
+import { analyzeLoudness } from '../core/audio.ts'
 import { finishSpeech, queueSpeech, startSpeech } from '../core/speech.ts'
 import { readVolume } from '../core/volume.ts'
 
@@ -143,6 +144,8 @@ type SayItem = {
   dataDir: string
   dir: string
   durationMs: number
+  envelope: number[]
+  envelopeRate: number
 }
 
 const queue: SayItem[] = []
@@ -150,10 +153,18 @@ let nextId = 1
 let pumping = false
 
 /** 入队后串行播放；开始/结束时同步给感知缓存 */
-function enqueue(text: string, path: string, dataDir: string, dir: string, durationMs: number): void {
-  const item: SayItem = { id: nextId++, text, path, dataDir, dir, durationMs }
+function enqueue(
+  text: string,
+  path: string,
+  dataDir: string,
+  dir: string,
+  durationMs: number,
+  envelope: number[],
+  envelopeRate: number,
+): void {
+  const item: SayItem = { id: nextId++, text, path, dataDir, dir, durationMs, envelope, envelopeRate }
   queue.push(item)
-  queueSpeech(item.id, item.text, item.durationMs)
+  queueSpeech(item.id, item.text, item.durationMs, item.envelope, item.envelopeRate)
   void pump().catch(() => undefined)
 }
 
@@ -165,7 +176,7 @@ async function pump(): Promise<void> {
     while (queue.length > 0) {
       const item = queue.shift()!
       const volume = readVolume(item.dataDir)
-      startSpeech(item.id, item.text, item.durationMs)
+      startSpeech(item.id, item.text, item.durationMs, item.envelope, item.envelopeRate)
       try {
         await play(item.path, volume)
       } finally {
@@ -215,7 +226,8 @@ registerTool({
     const dir = ttsDir(ctx.dataDir)
     const path = await synthesize(text, config, dir)
     const durationMs = probeDuration(path, text)
-    enqueue(text, path, ctx.dataDir, dir, durationMs)
+    const { values: envelope, rate: envelopeRate } = analyzeLoudness(path)
+    enqueue(text, path, ctx.dataDir, dir, durationMs, envelope, envelopeRate)
 
     return '成功'
   },

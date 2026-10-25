@@ -19,12 +19,16 @@ const SHORTCUT = 'CommandOrControl+Shift+E'
 let win = null
 let tray = null
 let isQuitting = false
-let forceInteractive = false
 let rendererIgnoreMouse = false
 let screenshotDone = false
 let dragState = null
 let dragTimer = null
 let dragSafety = null
+let settings = {
+  showTextAndControls: true,
+  showComposer: true,
+  clickThrough: true,
+}
 
 const gotLock = app.requestSingleInstanceLock()
 
@@ -37,6 +41,7 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     app.setName('Elio')
+    loadSettings()
 
     if (process.platform === 'darwin' && !process.env.EH_PET_KEEP_DOCK) {
       app.dock.hide()
@@ -166,6 +171,8 @@ function createWindow() {
     if (validatedURL.startsWith(STAGE_ORIGIN + '/')) loadOffline()
   })
 
+  win.webContents.on('did-finish-load', sendUiState)
+
   loadStage()
 }
 
@@ -208,12 +215,47 @@ function resetRendererIgnore() {
   applyMouseIgnore()
 }
 
+function settingsFile() {
+  return path.join(app.getPath('userData'), 'pet-settings.json')
+}
+
+function loadSettings() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'))
+    settings = {
+      showTextAndControls: raw.showTextAndControls !== false,
+      showComposer: raw.showComposer !== false,
+      clickThrough: raw.clickThrough !== false,
+    }
+  } catch {
+    // 没有配置就用默认值
+  }
+}
+
+function saveSettings() {
+  try {
+    fs.mkdirSync(path.dirname(settingsFile()), { recursive: true })
+    fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2))
+  } catch {
+    // 存不了也不影响这次使用
+  }
+}
+
+function sendUiState() {
+  if (!win || win.isDestroyed()) return
+  win.webContents.send('pet:ui-state', {
+    showTextAndControls: settings.showTextAndControls,
+    showComposer: settings.showComposer,
+    clickThrough: settings.clickThrough,
+  })
+}
+
 function applyMouseIgnore() {
   if (!win) return
-  const ignore = forceInteractive ? false : rendererIgnoreMouse
+  const ignore = settings.clickThrough ? rendererIgnoreMouse : false
   win.setIgnoreMouseEvents(ignore, { forward: true })
   if (process.env.EH_PET_DEBUG) {
-    console.log('[pet] ignore mouse:', ignore, 'force:', forceInteractive)
+    console.log('[pet] ignore mouse:', ignore, 'clickThrough:', settings.clickThrough)
   }
 }
 
@@ -236,15 +278,8 @@ function startWindowDrag() {
 function moveWindowDrag() {
   if (!win || !dragState) return
   const cursor = screen.getCursorScreenPoint()
-  const display = screen.getDisplayNearestPoint(cursor)
-  const area = display.workArea
-  const [width, height] = win.getSize()
-  const minX = area.x
-  const minY = area.y
-  const maxX = Math.max(minX, area.x + area.width - width)
-  const maxY = Math.max(minY, area.y + area.height - height)
-  const x = Math.min(Math.max(dragState.x + cursor.x - dragState.cursorX, minX), maxX)
-  const y = Math.min(Math.max(dragState.y + cursor.y - dragState.cursorY, minY), maxY)
+  const x = dragState.x + cursor.x - dragState.cursorX
+  const y = dragState.y + cursor.y - dragState.cursorY
   win.setPosition(Math.round(x), Math.round(y), false)
 }
 
@@ -269,22 +304,31 @@ function setWindowScale(percent) {
   if (!Number.isFinite(factor)) return
 
   const old = win.getBounds()
-  const display = screen.getDisplayMatching(old)
-  const area = display.workArea
   const width = old.width
-  const height = Math.min(Math.max(420, Math.round(BASE_HEIGHT * factor)), Math.max(420, area.height - 8))
-  const bottom = old.y + old.height
-  const x = Math.max(area.x, Math.min(old.x, area.x + area.width - width))
-  const y = Math.max(area.y, Math.min(bottom - height, area.y + area.height - height))
+  const height = Math.max(420, Math.round(BASE_HEIGHT * factor))
+  const x = old.x
+  const y = old.y + old.height - height
   win.setBounds({ x, y, width, height }, false)
   if (process.env.EH_PET_DEBUG) {
     console.log('[pet] size:', percent, { x, y, width, height })
   }
 }
 
+function resetWindowPosition() {
+  if (!win) return
+  const { workArea } = screen.getPrimaryDisplay()
+  const [width, height] = win.getSize()
+  const x = Math.max(workArea.x, workArea.x + workArea.width - width - 24)
+  const y = Math.max(workArea.y, workArea.y + workArea.height - height - 24)
+  win.setPosition(Math.round(x), Math.round(y), false)
+  if (!win.isVisible()) win.showInactive()
+}
+
 function registerShortcut() {
   const registered = globalShortcut.register(SHORTCUT, () => {
-    forceInteractive = !forceInteractive
+    settings.clickThrough = !settings.clickThrough
+    saveSettings()
+    sendUiState()
     applyMouseIgnore()
     rebuildTrayMenu()
   })
@@ -315,18 +359,47 @@ function rebuildTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: '强制交互',
+      label: '显示文字和进度条',
       type: 'checkbox',
-      checked: forceInteractive,
+      checked: settings.showTextAndControls,
       click: item => {
-        forceInteractive = item.checked
-        applyMouseIgnore()
+        settings.showTextAndControls = item.checked
+        saveSettings()
+        sendUiState()
         rebuildTrayMenu()
       },
     },
     {
+      label: '显示输入框',
+      type: 'checkbox',
+      checked: settings.showComposer,
+      click: item => {
+        settings.showComposer = item.checked
+        saveSettings()
+        sendUiState()
+        rebuildTrayMenu()
+      },
+    },
+    {
+      label: '点击穿透',
+      type: 'checkbox',
+      checked: settings.clickThrough,
+      click: item => {
+        settings.clickThrough = item.checked
+        saveSettings()
+        sendUiState()
+        applyMouseIgnore()
+        rebuildTrayMenu()
+      },
+    },
+    { type: 'separator' },
+    {
       label: '重新连接',
       click: loadStage,
+    },
+    {
+      label: '回到右下角',
+      click: resetWindowPosition,
     },
     {
       label: '打开网页舞台',

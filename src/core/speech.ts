@@ -10,12 +10,17 @@ export type Speaking = {
   text: string
   durationMs: number
   startedAt: number
+  /** 0–1 的响度包络，50ms 一帧 */
+  envelope: number[]
+  envelopeRate: number
 }
 
 export type Waiting = {
   id: number
   text: string
   durationMs: number
+  envelope: number[]
+  envelopeRate: number
 }
 
 export type LastSpeech = Speaking & {
@@ -23,8 +28,25 @@ export type LastSpeech = Speaking & {
 }
 
 export type SpeechEvent =
-  | { type: 'start'; id: number; text: string; durationMs: number; startedAt: number }
-  | { type: 'end'; id: number; text: string; durationMs: number; startedAt: number; finishedAt: number }
+  | {
+      type: 'start'
+      id: number
+      text: string
+      durationMs: number
+      startedAt: number
+      envelope: number[]
+      envelopeRate: number
+    }
+  | {
+      type: 'end'
+      id: number
+      text: string
+      durationMs: number
+      startedAt: number
+      finishedAt: number
+      envelope: number[]
+      envelopeRate: number
+    }
 
 export type SpeechSnapshot = {
   current: Speaking | null
@@ -39,12 +61,24 @@ let last: LastSpeech | null = null
 const listeners = new Set<(event: SpeechEvent) => void>()
 
 /** 合成完、进入播放队列 */
-export function queueSpeech(id: number, text: string, durationMs = 0): void {
-  pending.push({ id, text, durationMs })
+export function queueSpeech(
+  id: number,
+  text: string,
+  durationMs = 0,
+  envelope: number[] = [],
+  envelopeRate = 20,
+): void {
+  pending.push({ id, text, durationMs, envelope, envelopeRate })
 }
 
 /** 开始播放（从等待队列里移出来） */
-export function startSpeech(id: number, text: string, durationMs = 0): void {
+export function startSpeech(
+  id: number,
+  text: string,
+  durationMs = 0,
+  envelope: number[] = [],
+  envelopeRate = 20,
+): void {
   const index = pending.findIndex(item => item.id === id)
   if (index >= 0) pending.splice(index, 1)
 
@@ -53,6 +87,8 @@ export function startSpeech(id: number, text: string, durationMs = 0): void {
     text,
     durationMs,
     startedAt: Date.now(),
+    envelope,
+    envelopeRate,
   }
   current = item
   emit({ type: 'start', ...item })
@@ -90,9 +126,9 @@ export function renderSpeechState(): string {
 /** 舞台连接时补当前状态 */
 export function speechSnapshot(): SpeechSnapshot {
   return {
-    current: current ? { ...current } : null,
-    pending: pending.map(item => ({ ...item })),
-    last: last ? { ...last } : null,
+    current: current ? { ...current, envelope: [...current.envelope] } : null,
+    pending: pending.map(item => ({ ...item, envelope: [...item.envelope] })),
+    last: last ? { ...last, envelope: [...last.envelope] } : null,
   }
 }
 

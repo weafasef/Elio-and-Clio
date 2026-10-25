@@ -208,6 +208,8 @@
     filter: drop-shadow(0 18px 42px rgba(0, 0, 0, .5));
     -webkit-app-region: no-drag;
     cursor: grab;
+    transform-origin: 50% 92%;
+    will-change: transform;
   }
   html.pet .portrait:active { cursor: grabbing; }
   html.pet .overlay {
@@ -275,6 +277,15 @@
   }
   html.pet.pet-resizing .portrait {
     filter: none;
+  }
+  html.pet.hide-text-controls .dialogue,
+  html.pet.hide-text-controls .pet-controls {
+    visibility: hidden;
+    pointer-events: none;
+  }
+  html.pet.hide-composer .composer {
+    visibility: hidden;
+    pointer-events: none;
   }
   html.pet .pet-size {
     align-items: center;
@@ -358,8 +369,22 @@ let petIgnore = null
 let petPointerDown = false
 let draggingWindow = false
 let spaceDown = false
+let autoClickThrough = true
 let lastPointerX = 0
 let lastPointerY = 0
+let petScale = 1
+let motionRaf = 0
+let motionId = null
+let motionEnvelope = []
+let motionRate = 20
+let motionStartedAt = 0
+let motionDurationMs = 0
+let motionLevel = 0
+let motionEnding = false
+let motionEndingAt = 0
+
+const MOTION_BASE = 0.035
+const MOTION_TAU = Math.PI * 2
 
 const PUNCTUATION = new Set(['，', '。', '？', '！', '、'])
 let typing = null
@@ -467,6 +492,88 @@ function typeNext() {
   typingTimer = setTimeout(typeNext, Math.max(12, unitMs * weights[index]))
 }
 
+function motionEnvelopeAt(seconds) {
+  if (motionEnvelope.length === 0) return 0
+  const pos = Math.min(motionEnvelope.length - 1, Math.max(0, seconds * motionRate))
+  const index = Math.floor(pos)
+  const fraction = pos - index
+  const a = motionEnvelope[index] ?? 0
+  const b = motionEnvelope[index + 1] ?? 0
+  return a + (b - a) * fraction
+}
+
+function stopSpeechMotion(reset = true) {
+  if (motionRaf) cancelAnimationFrame(motionRaf)
+  motionRaf = 0
+  motionEnding = false
+  motionEndingAt = 0
+  motionLevel = 0
+  motionId = null
+  motionEnvelope = []
+  if (reset && portraitEl) portraitEl.style.transform = ''
+}
+
+function startSpeechMotion(speech) {
+  if (!petMode || !portraitEl || !speech) return
+  if (motionId === speech.id && motionRaf) return
+  stopSpeechMotion(true)
+
+  motionId = speech.id
+  motionEnvelope = Array.isArray(speech.envelope) ? speech.envelope : []
+  motionRate = Number(speech.envelopeRate) > 0 ? Number(speech.envelopeRate) : 20
+  motionStartedAt = Number(speech.startedAt) || Date.now()
+  motionDurationMs = Number(speech.durationMs) || 0
+  motionLevel = 0
+  motionEnding = false
+  motionEndingAt = 0
+  motionRaf = requestAnimationFrame(motionTick)
+}
+
+function finishSpeechMotion() {
+  if (!motionRaf || motionEnding) return
+  motionEnding = true
+  motionEndingAt = Date.now()
+}
+
+function motionTick() {
+  if (!motionRaf || !portraitEl) return
+
+  const now = Date.now()
+  const elapsed = Math.max(0, (now - motionStartedAt) / 1000)
+  if (!motionEnding && motionDurationMs > 0 && elapsed * 1000 > motionDurationMs + 500) {
+    finishSpeechMotion()
+  }
+
+  const speaking = !motionEnding
+  const t = motionDurationMs > 0 ? Math.min(elapsed, motionDurationMs / 1000) : elapsed
+  const env = motionEnvelopeAt(t)
+  const target = speaking
+    ? MOTION_BASE + (1 - MOTION_BASE) * Math.pow(env, 1.35)
+    : 0
+
+  const attack = target > motionLevel ? 0.52 : 0.17
+  motionLevel += (target - motionLevel) * attack
+
+  const size = Math.max(0.7, Math.min(1.1, petScale))
+  const level = motionLevel
+  const y = Math.sin(elapsed * MOTION_TAU * 4.8) * (0.35 + 7.2 * level) * size
+  const x = (
+    Math.sin(elapsed * MOTION_TAU * 10.7 + 0.6) * 0.8 +
+    Math.sin(elapsed * MOTION_TAU * 13.3 + 1.9) * 0.35
+  ) * (0.1 + 2.2 * level) * size
+  const rotate = Math.sin(elapsed * MOTION_TAU * 7.3 + 1.1) * (0.02 + 0.9 * level) * size
+  const scaleX = 1 + 0.03 * level * size
+  const scaleY = 1 - 0.02 * level * size
+  portraitEl.style.transform = `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, 0) rotate(${rotate.toFixed(3)}deg) scale(${scaleX.toFixed(4)}, ${scaleY.toFixed(4)})`
+
+  if (motionEnding && now - motionEndingAt > 380) {
+    stopSpeechMotion(true)
+    return
+  }
+
+  motionRaf = requestAnimationFrame(motionTick)
+}
+
 function applySpeech(snapshot) {
   if (!snapshot) return
   if (snapshot.current) {
@@ -476,8 +583,10 @@ function applySpeech(snapshot) {
       snapshot.current.startedAt,
       snapshot.current.id,
     )
+    startSpeechMotion(snapshot.current)
     return
   }
+  stopSpeechMotion(true)
   if (snapshot.last) {
     showFull(snapshot.last.text, snapshot.last.id)
     return
@@ -589,7 +698,10 @@ function isPetControlTarget(target) {
 function startPetDrag(event) {
   if (!petMode || !petBridge?.dragStart || draggingWindow) return false
   if (event.button !== 0) return false
-  if (!spaceDown) return false
+  if (!spaceDown) {
+    if (autoClickThrough) return false
+    if (event.target !== portraitEl) return false
+  }
   if (isEditableTarget(event.target) || isPetControlTarget(event.target)) return false
 
   draggingWindow = true
@@ -614,7 +726,8 @@ function endPetDrag() {
 }
 
 function setPetSizeDisplay(percent) {
-  document.documentElement.style.setProperty('--pet-scale', String(percent / 100))
+  petScale = percent / 100
+  document.documentElement.style.setProperty('--pet-scale', String(petScale))
   if (!petSizeValueEl) return
   petSizeValueEl.textContent = `${percent}%`
 }
@@ -690,6 +803,15 @@ if (petMode && petBridge) {
   }
 
   setPetIgnore(false)
+
+  if (petBridge?.onUiState) {
+    petBridge.onUiState(state => {
+      autoClickThrough = state?.clickThrough !== false
+      document.documentElement.classList.toggle('hide-text-controls', state?.showTextAndControls === false)
+      document.documentElement.classList.toggle('hide-composer', state?.showComposer === false)
+      if (state?.showComposer === false && document.activeElement === inputEl) inputEl.blur()
+    })
+  }
 
   document.addEventListener('mousemove', event => {
     if (petPointerDown || draggingWindow) return
@@ -769,11 +891,13 @@ events.onmessage = event => {
 
   if (data.type === 'speech-start') {
     startTyping(data.text, data.durationMs, data.startedAt, data.id)
+    startSpeechMotion(data)
     return
   }
 
   if (data.type === 'speech-end') {
     if (data.id === currentId) finishTyping()
+    if (data.id === motionId) finishSpeechMotion()
     return
   }
 
