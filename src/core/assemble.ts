@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { renderHistory } from './history.ts'
 import { renderPerception } from './perception.ts'
 import type { WakeSource } from './perception.ts'
+import { renderMemory } from './memory.ts'
 import { renderPersona } from './persona.ts'
 import { listToolSchemas } from '../registries/tools.ts'
 import type { Msg, StreamRequest } from '../model.ts'
@@ -20,16 +21,24 @@ export type AssembleInput = {
   provided?: Record<string, string>
 }
 
+export type AssembleResult = {
+  request: StreamRequest
+  /** 这一轮用的记忆版本 */
+  memoryRev: number
+  /** 记忆块大约多少 token */
+  memoryTokens: number
+}
+
 /**
  * 组装一次模型调用的入参。
  *
  *   system   ← 人格提示词
- *   messages ← [会话历史, 感知缓存]   ← 感知缓存永远在最后，且不跟历史合并
+ *   messages ← [会话历史, 记忆文档, 感知缓存]   ← 感知缓存永远在最后
  *   tools    ← 工具表
  *
  * 这里是唯一决定"谁在前谁在后"的地方，缓存规则都集中在这。
  */
-export function assemble(input: AssembleInput): StreamRequest {
+export function assemble(input: AssembleInput): AssembleResult {
   const messages: Msg[] = []
 
   // 会话历史：只追加的那一大段。空历史就整条不发，避免一条空的 user 消息
@@ -37,6 +46,10 @@ export function assemble(input: AssembleInput): StreamRequest {
   if (history) {
     messages.push({ role: 'user', content: history })
   }
+
+  // 记忆文档：慢变化，放在历史后、感知前；空了也发「（空）」
+  const memory = renderMemory(input.dataDir)
+  messages.push({ role: 'user', content: memory.text })
 
   // 感知缓存：每轮现算、放最末尾、永不进历史
   let perception = renderPerception({
@@ -88,8 +101,12 @@ export function assemble(input: AssembleInput): StreamRequest {
   }
 
   return {
-    system: renderPersona(input.dataDir),
-    messages,
-    tools: listToolSchemas(),
+    request: {
+      system: renderPersona(input.dataDir),
+      messages,
+      tools: listToolSchemas(),
+    },
+    memoryRev: memory.rev,
+    memoryTokens: memory.tokens,
   }
 }

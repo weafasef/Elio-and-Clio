@@ -5,6 +5,7 @@ import type { EntrySource } from './history.ts'
 import type { WakeSource } from './perception.ts'
 import { saveTrace } from './trace.ts'
 import { recordCall } from './metrics.ts'
+import { summarizeChanges } from './memory.ts'
 import { runTool } from '../registries/tools.ts'
 import { streamChat } from '../model.ts'
 import type { Config } from '../config.ts'
@@ -47,6 +48,9 @@ export type StepEvents = {
  * 这样重启后"距上次活动"也是个合理的数字。
  */
 let lastActivityAt: Date | undefined
+
+/** 上一条 trace 记的记忆版本；用来只记录版本之间的变化 */
+let lastTraceMemoryRev: number | undefined
 
 /**
  * 跑完一步（step = 若干轮 loop）。
@@ -93,7 +97,7 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
         }
       }
 
-      const request = assemble({
+      const assembled = assemble({
         dataDir,
         wakeSource,
         usedTokens,
@@ -102,6 +106,15 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
         // 每轮现算（闹钟剩余时间会变）
         provided: events.perception?.(),
       })
+      const request = assembled.request
+
+      // 记忆变了才把变化摘要写进 trace；没变就只有版本号
+      let memoryChange: string | undefined
+      if (lastTraceMemoryRev !== undefined && assembled.memoryRev > lastTraceMemoryRev) {
+        const summary = summarizeChanges(dataDir, lastTraceMemoryRev, assembled.memoryRev)
+        if (summary) memoryChange = summary
+      }
+      lastTraceMemoryRev = assembled.memoryRev
 
       let result
       try {
@@ -152,6 +165,9 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
         step: stepId,
         loop,
         historyCount: readHistory(dataDir).length,
+        memoryRev: assembled.memoryRev,
+        memoryTokens: assembled.memoryTokens,
+        ...(memoryChange ? { memoryChange } : {}),
         system: request.system ?? '',
         perception,
         tools: (request.tools ?? []).map(tool => tool.name),

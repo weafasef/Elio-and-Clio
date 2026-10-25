@@ -17,12 +17,19 @@ export type TraceResponse = {
  * - system：几百字，但她会改人格，不存就看不到"当时"的版本
  * - perception：每轮都变
  * - historyCount：这一轮请求里用了历史的前多少条（历史本身从 history.jsonl 重建）
+ * - memoryRev：这一轮用的记忆版本；正文和变化在 memory/，trace 里不存全文
  */
 export type TraceRecord = {
   t: string
   step: number
   loop: number
   historyCount: number
+  /** 这一轮用的记忆版本；旧记录没有这个字段 */
+  memoryRev?: number
+  /** 记忆块大约多少 token */
+  memoryTokens?: number
+  /** 记忆版本变了才写，只存变化摘要 */
+  memoryChange?: string
   system: string
   perception: string
   tools: string[]

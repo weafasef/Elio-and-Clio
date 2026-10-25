@@ -5,6 +5,7 @@ import './tools/alarms.ts'
 // import './tools/next.ts'     ← 先不注册（读书）
 import './tools/history.ts'
 import './tools/persona.ts'
+import './tools/memory.ts'
 import './tools/say.ts'
 import './tools/screenshot.ts'
 import { startServer } from './web/server.ts'
