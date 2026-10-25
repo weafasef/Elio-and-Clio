@@ -4,11 +4,16 @@
   "private": true,
   "type": "module",
   "description": "Elio Harness",
+  "main": "desktop/main.cjs",
   "engines": {
     "node": ">=22.6"
   },
   "scripts": {
     "ping": "node scripts/ping.ts",
-    "start": "node src/main.ts"
+    "start": "node src/main.ts",
+    "desktop": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^45.0.0"
   }
 }

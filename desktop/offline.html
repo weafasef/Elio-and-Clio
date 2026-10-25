@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elio</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: transparent;
+    color: #eee;
+    font: 14px/1.7 -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  .card {
+    width: 100%;
+    padding: 22px 20px;
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 16px;
+    background: rgba(14, 15, 20, .92);
+    box-shadow: 0 18px 60px rgba(0, 0, 0, .45);
+    -webkit-app-region: drag;
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  p {
+    margin: 0 0 16px;
+    color: #8b8f9a;
+    font-size: 13px;
+  }
+  code {
+    color: #c7d2fe;
+  }
+  button {
+    height: 34px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 9px;
+    background: #7aa2f7;
+    color: #0b0c10;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+  }
+  button:hover { filter: brightness(1.08); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>eh 服务没连上</h1>
+    <p>先在项目目录运行 <code>npm start</code>，然后点重试。</p>
+    <button onclick="window.ehPet && window.ehPet.retry()">重试</button>
+  </div>
+</body>
+</html>

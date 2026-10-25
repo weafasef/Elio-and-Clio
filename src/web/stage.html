@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Elio</title>
+<script>
+  if (new URLSearchParams(location.search).has('pet')) {
+    document.documentElement.classList.add('pet')
+  }
+</script>
 <style>
   :root {
     --line: rgba(255, 255, 255, .12);
@@ -86,8 +91,19 @@
     line-height: 1.6;
     white-space: pre-wrap;
     word-break: break-word;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
   }
   .dialogue.speaking { border-color: rgba(122, 162, 247, .38); }
+
+  .pet-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .pet-size { display: none; }
 
   .volume {
     align-self: flex-end;
@@ -155,6 +171,140 @@
     .composer textarea { min-height: 36px; font-size: 14px; }
     .composer button { height: 36px; padding: 0 12px; }
   }
+
+  /* 桌宠模式：只在 Electron 的 /stage?pet=1 里生效 */
+  html.pet { --pet-scale: 1; }
+  html.pet, html.pet body { background: transparent; }
+  html.pet body {
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  html.pet textarea, html.pet input {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  html.pet header { display: none; }
+  html.pet .stage {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    align-items: stretch;
+    justify-content: stretch;
+    min-width: 0;
+    padding: 8px;
+    gap: 8px;
+  }
+  html.pet .portrait {
+    align-self: center;
+    justify-self: center;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    min-height: 0;
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    opacity: 1;
+    filter: drop-shadow(0 18px 42px rgba(0, 0, 0, .5));
+    -webkit-app-region: no-drag;
+    cursor: grab;
+  }
+  html.pet .portrait:active { cursor: grabbing; }
+  html.pet .overlay {
+    position: relative;
+    left: auto;
+    bottom: auto;
+    transform: none;
+    width: min(100%, calc(100% * var(--pet-scale, 1)));
+    min-width: 0;
+    gap: calc(8px * var(--pet-scale, 1));
+    justify-self: center;
+    -webkit-app-region: no-drag;
+  }
+  html.pet .dialogue {
+    min-width: 0;
+    padding: calc(10px * var(--pet-scale, 1)) calc(14px * var(--pet-scale, 1));
+    border-radius: calc(12px * var(--pet-scale, 1));
+    font-size: calc(16px * var(--pet-scale, 1));
+    background: rgba(14, 15, 20, .88);
+    backdrop-filter: none;
+  }
+  html.pet .composer {
+    min-width: 0;
+    width: 100%;
+    gap: calc(8px * var(--pet-scale, 1));
+  }
+  html.pet .composer textarea {
+    min-width: 0;
+    min-height: calc(38px * var(--pet-scale, 1));
+    padding: calc(9px * var(--pet-scale, 1)) calc(12px * var(--pet-scale, 1));
+    font-size: calc(14px * var(--pet-scale, 1));
+  }
+  html.pet .composer button {
+    height: calc(38px * var(--pet-scale, 1));
+    padding: 0 calc(16px * var(--pet-scale, 1));
+    font-size: calc(14px * var(--pet-scale, 1));
+  }
+  html.pet .pet-controls {
+    justify-content: space-between;
+    min-width: 0;
+    gap: calc(8px * var(--pet-scale, 1));
+  }
+  html.pet .pet-controls .pet-size,
+  html.pet .pet-controls .volume {
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    align-self: auto;
+  }
+  html.pet .pet-controls .pet-size {
+    min-width: 120px;
+  }
+  html.pet .pet-controls .volume {
+    min-width: 110px;
+  }
+  html.pet .pet-controls .pet-size input,
+  html.pet .pet-controls .volume input {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 32px;
+  }
+  html.pet .pet-size input {
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  html.pet.pet-resizing .portrait {
+    filter: none;
+  }
+  html.pet .pet-size {
+    align-items: center;
+    gap: calc(8px * var(--pet-scale, 1));
+    padding: calc(6px * var(--pet-scale, 1)) calc(10px * var(--pet-scale, 1));
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(14, 15, 20, .7);
+    color: var(--dim);
+    font-size: calc(12px * var(--pet-scale, 1));
+    line-height: calc(20px * var(--pet-scale, 1));
+  }
+  html.pet .volume {
+    gap: calc(8px * var(--pet-scale, 1));
+    padding: calc(6px * var(--pet-scale, 1)) calc(12px * var(--pet-scale, 1));
+    font-size: calc(12px * var(--pet-scale, 1));
+    line-height: calc(20px * var(--pet-scale, 1));
+  }
+  html.pet .pet-size input,
+  html.pet .volume input {
+    height: calc(16px * var(--pet-scale, 1));
+  }
+  #pet-size-value,
+  #volume-value {
+    min-width: calc(34px * var(--pet-scale, 1));
+  }
+  #pet-size-value {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
 </style>
 </head>
 <body>
@@ -169,14 +319,21 @@
 <main class="stage">
   <img class="portrait" src="/assets/elio.png" alt="Elio">
   <div class="overlay">
-    <div class="dialogue" id="dialogue"><span id="line">……</span></div>
-    <div class="volume">
-      <span id="volume-icon">🔊</span>
-      <input id="volume" type="range" min="0" max="100" step="1" value="100" aria-label="音量">
-      <span id="volume-value">100%</span>
+    <div class="dialogue" id="dialogue" data-pet-interactive><span id="line">……</span></div>
+    <div class="pet-controls" data-pet-interactive>
+      <div class="pet-size">
+        <span>尺寸</span>
+        <input id="pet-size" type="range" min="70" max="110" step="1" value="100" aria-label="尺寸">
+        <span id="pet-size-value">100%</span>
+      </div>
+      <div class="volume">
+        <span id="volume-icon">🔊</span>
+        <input id="volume" type="range" min="0" max="100" step="1" value="100" aria-label="音量">
+        <span id="volume-value">100%</span>
+      </div>
     </div>
-    <form class="composer" id="composer">
-      <textarea id="input" rows="1" placeholder="跟她说点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+    <form class="composer" id="composer" data-pet-interactive>
+      <textarea id="input" rows="1" aria-label="输入消息"></textarea>
       <button type="submit">发送</button>
     </form>
   </div>
@@ -191,6 +348,18 @@ const volumeValueEl = document.getElementById('volume-value')
 const volumeIconEl = document.getElementById('volume-icon')
 const inputEl = document.getElementById('input')
 const composerEl = document.getElementById('composer')
+const portraitEl = document.querySelector('.portrait')
+const petSizeEl = document.getElementById('pet-size')
+const petSizeValueEl = document.getElementById('pet-size-value')
+
+const petMode = document.documentElement.classList.contains('pet')
+const petBridge = window.ehPet
+let petIgnore = null
+let petPointerDown = false
+let draggingWindow = false
+let spaceDown = false
+let lastPointerX = 0
+let lastPointerY = 0
 
 const PUNCTUATION = new Set(['，', '。', '？', '！', '、'])
 let typing = null
@@ -389,6 +558,193 @@ composerEl.addEventListener('submit', event => {
   event.preventDefault()
   void sendMessage()
 })
+
+function isPetInteractiveAt(clientX, clientY) {
+  const target = document.elementFromPoint(clientX, clientY)
+  if (!target) return false
+  if (target === portraitEl) return spaceDown
+  return Boolean(target.closest?.('[data-pet-interactive]'))
+}
+
+function setPetIgnore(ignore) {
+  if (!petMode || !petBridge) return
+  if (petIgnore === ignore) return
+  petIgnore = ignore
+  petBridge.setIgnoreMouseEvents(ignore)
+}
+
+function updatePetIgnoreAt(clientX, clientY) {
+  if (!petMode || !petBridge) return
+  setPetIgnore(!isPetInteractiveAt(clientX, clientY))
+}
+
+function isEditableTarget(target) {
+  return Boolean(target?.closest?.('input, textarea, button, a, [contenteditable="true"]'))
+}
+
+function isPetControlTarget(target) {
+  return Boolean(target?.closest?.('.composer, .pet-controls'))
+}
+
+function startPetDrag(event) {
+  if (!petMode || !petBridge?.dragStart || draggingWindow) return false
+  if (event.button !== 0) return false
+  if (!spaceDown) return false
+  if (isEditableTarget(event.target) || isPetControlTarget(event.target)) return false
+
+  draggingWindow = true
+  petPointerDown = true
+  petBridge.dragStart()
+  setPetIgnore(false)
+  try {
+    event.target.setPointerCapture?.(event.pointerId)
+  } catch {
+    // 窗口移动后指针捕获可能已经失效，忽略即可。
+  }
+  event.preventDefault()
+  return true
+}
+
+function endPetDrag() {
+  if (!draggingWindow) return
+  draggingWindow = false
+  petPointerDown = false
+  petBridge?.dragEnd()
+  updatePetIgnoreAt(lastPointerX, lastPointerY)
+}
+
+function setPetSizeDisplay(percent) {
+  document.documentElement.style.setProperty('--pet-scale', String(percent / 100))
+  if (!petSizeValueEl) return
+  petSizeValueEl.textContent = `${percent}%`
+}
+
+function applyPetSize(percent, persist = false) {
+  const value = Math.max(70, Math.min(110, Math.round(percent)))
+  setPetSizeDisplay(value)
+  if (!petMode || !petBridge?.setScale) return
+  if (persist) {
+    try {
+      localStorage.setItem('eh.petScale', String(value))
+    } catch {
+      // 存不了就算了，不影响这次调整。
+    }
+  }
+  petBridge.setScale(value)
+}
+
+if (petMode && petBridge) {
+  if (petSizeEl) {
+    let saved = 100
+    try {
+      const raw = Number(localStorage.getItem('eh.petScale'))
+      if (Number.isFinite(raw) && raw >= 70 && raw <= 110) saved = Math.round(raw)
+    } catch {
+      saved = 100
+    }
+    petSizeEl.value = String(saved)
+    setPetSizeDisplay(saved)
+    let sizeTimer = 0
+    let pendingSize = saved
+    let lastSizeAt = 0
+
+    function beginPetSizeDrag() {
+      document.documentElement.classList.add('pet-resizing')
+    }
+
+    function endPetSizeDrag() {
+      document.documentElement.classList.remove('pet-resizing')
+    }
+
+    function schedulePetSize(value) {
+      pendingSize = value
+      if (sizeTimer) return
+      const wait = Math.max(0, 33 - (performance.now() - lastSizeAt))
+      sizeTimer = setTimeout(() => {
+        sizeTimer = 0
+        lastSizeAt = performance.now()
+        applyPetSize(pendingSize, false)
+      }, wait)
+    }
+
+    petSizeEl.addEventListener('pointerdown', beginPetSizeDrag)
+    petSizeEl.addEventListener('pointerup', endPetSizeDrag)
+    petSizeEl.addEventListener('pointercancel', endPetSizeDrag)
+    document.addEventListener('pointerup', endPetSizeDrag, true)
+    document.addEventListener('pointercancel', endPetSizeDrag, true)
+    petSizeEl.addEventListener('input', () => {
+      const value = Number(petSizeEl.value)
+      setPetSizeDisplay(value)
+      schedulePetSize(value)
+    })
+    petSizeEl.addEventListener('change', () => {
+      if (sizeTimer) {
+        clearTimeout(sizeTimer)
+        sizeTimer = 0
+      }
+      applyPetSize(Number(petSizeEl.value), true)
+      endPetSizeDrag()
+    })
+    window.addEventListener('blur', endPetSizeDrag)
+    applyPetSize(saved, true)
+  }
+
+  setPetIgnore(false)
+
+  document.addEventListener('mousemove', event => {
+    if (petPointerDown || draggingWindow) return
+    setPetIgnore(!isPetInteractiveAt(event.clientX, event.clientY))
+  }, { passive: true })
+
+  document.addEventListener('pointerdown', event => {
+    lastPointerX = event.clientX
+    lastPointerY = event.clientY
+    petPointerDown = true
+    startPetDrag(event)
+  }, true)
+
+  document.addEventListener('pointermove', event => {
+    lastPointerX = event.clientX
+    lastPointerY = event.clientY
+  }, { passive: true })
+
+  document.addEventListener('pointerup', () => {
+    const wasDragging = draggingWindow
+    petPointerDown = false
+    if (wasDragging) endPetDrag()
+    else updatePetIgnoreAt(lastPointerX, lastPointerY)
+  }, true)
+
+  document.addEventListener('pointercancel', () => {
+    petPointerDown = false
+    endPetDrag()
+  }, true)
+
+  document.addEventListener('keydown', event => {
+    if (event.code !== 'Space' || event.repeat) return
+    if (isEditableTarget(event.target) || isPetControlTarget(event.target)) return
+    event.preventDefault()
+    spaceDown = true
+    setPetIgnore(false)
+  })
+
+  document.addEventListener('keyup', event => {
+    if (event.code !== 'Space') return
+    spaceDown = false
+    if (!draggingWindow) updatePetIgnoreAt(lastPointerX, lastPointerY)
+  })
+
+  window.addEventListener('blur', () => {
+    spaceDown = false
+    petPointerDown = false
+    endPetDrag()
+    setPetIgnore(true)
+  })
+
+  document.addEventListener('mouseleave', () => {
+    if (!petPointerDown && !draggingWindow) setPetIgnore(true)
+  })
+}
 
 const events = new EventSource('/events')
 
