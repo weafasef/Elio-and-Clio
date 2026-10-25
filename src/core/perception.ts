@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { formatFirstToken, formatTokenSpeed, readMetrics } from './metrics.ts'
 import { renderSpeechState } from './speech.ts'
+import { readVolume } from './volume.ts'
 
 /** 唤醒来源（这一 step 是被什么开启的） */
 export type WakeSource = '外界消息' | '工具调用' | '工具返回' | '自由活动'
@@ -46,6 +47,7 @@ const DEFAULT_CONFIG: PerceptionConfig = {
     '- 上下文占用率：{{usage}}',
     '- 我的备忘录：{{memo}}',
     '- 语音：{{speech}}',
+    '- 语音音量：{{volume}}',
   ],
 }
 
@@ -92,9 +94,15 @@ function collectValues(input: PerceptionInput): Record<string, string> {
       : `${percent}%。${used}/${input.windowTokens} token`,
     memo: readMemo(input.dataDir),
     speech: renderSpeechState(),
+    volume: formatVolume(readVolume(input.dataDir)),
     // 外面递进来的最后展开，同名覆盖上面的默认值
     ...input.provided,
   }
+}
+
+function formatVolume(value: number): string {
+  const percent = Math.round(value * 100)
+  return percent === 0 ? '0%（静音）' : `${percent}%`
 }
 
 function formatDate(date: Date): string {

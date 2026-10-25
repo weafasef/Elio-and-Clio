@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elio</title>
+<style>
+  :root {
+    --line: rgba(255, 255, 255, .12);
+    --dim: #8b8f9a;
+    --accent: #7aa2f7;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 18%, #1d1f28 0%, #0b0c10 68%);
+    color: #eee;
+    font: 14px/1.7 -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 24px;
+    color: var(--dim);
+    font-size: 12px;
+  }
+  .brand {
+    color: #e8e8e8;
+    font-weight: 600;
+    letter-spacing: .18em;
+  }
+  .meta { display: flex; align-items: center; gap: 14px; }
+  .meta a { color: var(--accent); text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+
+  .stage {
+    position: relative;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 64px 20px 190px;
+  }
+  .portrait {
+    display: block;
+    max-height: calc(100vh - 250px);
+    max-width: min(720px, 94vw);
+    object-fit: contain;
+    border-radius: 18px;
+    opacity: .96;
+    filter: drop-shadow(0 24px 80px rgba(0, 0, 0, .55));
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+
+  .overlay {
+    position: absolute;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    width: min(860px, 92vw);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .dialogue {
+    align-self: center;
+    width: fit-content;
+    max-width: 100%;
+    min-height: 0;
+    padding: 10px 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(14, 15, 20, .78);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, .35);
+    font-size: clamp(16px, 1.8vw, 21px);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .dialogue.speaking { border-color: rgba(122, 162, 247, .38); }
+
+  .volume {
+    align-self: flex-end;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(14, 15, 20, .7);
+    color: var(--dim);
+    font-size: 12px;
+  }
+  .volume input {
+    width: 120px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  #volume-value {
+    min-width: 34px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .composer {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+  }
+  .composer textarea {
+    flex: 1;
+    min-height: 38px;
+    max-height: 110px;
+    resize: none;
+    padding: 9px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    outline: none;
+    background: rgba(14, 15, 20, .78);
+    color: #eee;
+    font: inherit;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .composer textarea:focus { border-color: rgba(122, 162, 247, .5); }
+  .composer button {
+    height: 38px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #0b0c10;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .composer button:hover { filter: brightness(1.08); }
+
+  @media (max-width: 640px) {
+    header { padding: 14px 16px; }
+    .stage { padding: 56px 0 170px; }
+    .portrait { max-height: calc(100vh - 210px); max-width: 100vw; border-radius: 0; }
+    .overlay { bottom: 12px; width: calc(100vw - 24px); }
+    .dialogue { min-height: 0; padding: 9px 12px; font-size: 17px; }
+    .volume input { width: 90px; }
+    .composer textarea { min-height: 36px; font-size: 14px; }
+    .composer button { height: 36px; padding: 0 12px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">Elio</span>
+  <div class="meta">
+    <span id="status">连接中…</span>
+    <a href="/" target="_self">记录 ↗</a>
+  </div>
+</header>
+
+<main class="stage">
+  <img class="portrait" src="/assets/elio.png" alt="Elio">
+  <div class="overlay">
+    <div class="dialogue" id="dialogue"><span id="line">……</span></div>
+    <div class="volume">
+      <span id="volume-icon">🔊</span>
+      <input id="volume" type="range" min="0" max="100" step="1" value="100" aria-label="音量">
+      <span id="volume-value">100%</span>
+    </div>
+    <form class="composer" id="composer">
+      <textarea id="input" rows="1" placeholder="跟她说点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+      <button type="submit">发送</button>
+    </form>
+  </div>
+</main>
+
+<script type="module">
+const statusEl = document.getElementById('status')
+const lineEl = document.getElementById('line')
+const dialogueEl = document.getElementById('dialogue')
+const volumeEl = document.getElementById('volume')
+const volumeValueEl = document.getElementById('volume-value')
+const volumeIconEl = document.getElementById('volume-icon')
+const inputEl = document.getElementById('input')
+const composerEl = document.getElementById('composer')
+
+const PUNCTUATION = new Set(['，', '。', '？', '！', '、'])
+let typing = null
+let typingTimer = null
+let currentId = null
+let draggingVolume = false
+let composing = false
+let compositionEndedAt = 0
+
+function setStatus(text) {
+  statusEl.textContent = text
+}
+
+function setVolumeDisplay(percent, updateSlider = true) {
+  const value = Math.max(0, Math.min(100, Math.round(percent)))
+  if (updateSlider) volumeEl.value = String(value)
+  volumeValueEl.textContent = value === 0 ? '静音' : `${value}%`
+  volumeIconEl.textContent = value === 0 ? '🔇' : '🔊'
+}
+
+function stopTyping() {
+  if (typingTimer) clearTimeout(typingTimer)
+  typingTimer = null
+  typing = null
+  dialogueEl.classList.remove('speaking')
+}
+
+function finishTyping() {
+  if (typing) {
+    lineEl.textContent = typing.chars.join('')
+    typing = null
+  }
+  if (typingTimer) clearTimeout(typingTimer)
+  typingTimer = null
+  dialogueEl.classList.remove('speaking')
+}
+
+function showFull(text, id = currentId) {
+  stopTyping()
+  currentId = id
+  lineEl.textContent = text
+}
+
+function estimateDuration(text) {
+  return Math.max(800, [...text].length * 180)
+}
+
+function weightsOf(chars) {
+  return chars.map(char => PUNCTUATION.has(char) ? 3 : 1)
+}
+
+function indexAtProgress(weights, progress) {
+  const total = weights.reduce((sum, value) => sum + value, 0)
+  if (total === 0) return 0
+  const target = Math.max(0, Math.min(1, progress)) * total
+  let seen = 0
+  for (let i = 0; i < weights.length; i++) {
+    seen += weights[i]
+    if (seen >= target) return i
+  }
+  return weights.length
+}
+
+function startTyping(text, durationMs, startedAt, id) {
+  stopTyping()
+  currentId = id
+
+  const chars = [...text]
+  if (chars.length === 0) {
+    lineEl.textContent = ''
+    return
+  }
+
+  const weights = weightsOf(chars)
+  const totalWeight = weights.reduce((sum, value) => sum + value, 0)
+  const totalMs = durationMs > 0 ? durationMs : estimateDuration(text)
+  const elapsed = Math.max(0, Date.now() - (startedAt || Date.now()))
+  const progress = Math.min(1, elapsed / totalMs)
+  let index = indexAtProgress(weights, progress)
+
+  if (index >= chars.length) {
+    showFull(text, id)
+    return
+  }
+
+  const unitMs = Math.max(12, (totalMs * 0.85) / Math.max(1, totalWeight))
+  typing = { chars, weights, index, unitMs, id }
+  lineEl.textContent = chars.slice(0, index).join('')
+  dialogueEl.classList.add('speaking')
+  typeNext()
+}
+
+function typeNext() {
+  if (!typing) return
+  const { chars, weights, unitMs } = typing
+  const index = typing.index
+
+  if (index >= chars.length) {
+    finishTyping()
+    return
+  }
+
+  typing.index = index + 1
+  lineEl.textContent = chars.slice(0, index + 1).join('')
+  typingTimer = setTimeout(typeNext, Math.max(12, unitMs * weights[index]))
+}
+
+function applySpeech(snapshot) {
+  if (!snapshot) return
+  if (snapshot.current) {
+    startTyping(
+      snapshot.current.text,
+      snapshot.current.durationMs,
+      snapshot.current.startedAt,
+      snapshot.current.id,
+    )
+    return
+  }
+  if (snapshot.last) {
+    showFull(snapshot.last.text, snapshot.last.id)
+    return
+  }
+  currentId = null
+  stopTyping()
+  lineEl.textContent = '……'
+}
+
+async function saveVolume(percent) {
+  try {
+    const res = await fetch('/volume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ volume: percent / 100 }),
+    })
+    if (!res.ok) throw new Error('save failed')
+  } catch {
+    setStatus('音量保存失败')
+  }
+}
+
+volumeEl.addEventListener('input', () => {
+  draggingVolume = true
+  setVolumeDisplay(Number(volumeEl.value), false)
+})
+
+volumeEl.addEventListener('change', () => {
+  draggingVolume = false
+  const percent = Number(volumeEl.value)
+  setVolumeDisplay(percent, false)
+  void saveVolume(percent)
+})
+
+function resizeInput() {
+  inputEl.style.height = 'auto'
+  inputEl.style.height = Math.min(110, inputEl.scrollHeight) + 'px'
+}
+
+async function sendMessage() {
+  const text = inputEl.value.trim()
+  if (!text) return
+
+  inputEl.value = ''
+  inputEl.style.height = ''
+
+  try {
+    const res = await fetch('/say', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+    if (!res.ok) {
+      const info = await res.json().catch(() => ({}))
+      throw new Error(info.error || '发送失败')
+    }
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : '发送失败')
+    inputEl.value = text
+    resizeInput()
+  }
+}
+
+inputEl.addEventListener('input', resizeInput)
+inputEl.addEventListener('compositionstart', () => { composing = true })
+inputEl.addEventListener('compositionend', () => {
+  composing = false
+  compositionEndedAt = Date.now()
+})
+inputEl.addEventListener('keydown', event => {
+  if (event.key !== 'Enter' || event.shiftKey) return
+  if (composing || event.isComposing || event.keyCode === 229) return
+  if (Date.now() - compositionEndedAt < 80) return
+  event.preventDefault()
+  void sendMessage()
+})
+composerEl.addEventListener('submit', event => {
+  event.preventDefault()
+  void sendMessage()
+})
+
+const events = new EventSource('/events')
+
+events.onopen = () => setStatus('已连接')
+events.onerror = () => setStatus('重连中…')
+
+events.onmessage = event => {
+  let data
+  try {
+    data = JSON.parse(event.data)
+  } catch {
+    return
+  }
+
+  if (data.type === 'state') {
+    if (!draggingVolume && typeof data.volume === 'number') {
+      setVolumeDisplay(data.volume * 100)
+    }
+    applySpeech(data.speech)
+    return
+  }
+
+  if (data.type === 'speech-start') {
+    startTyping(data.text, data.durationMs, data.startedAt, data.id)
+    return
+  }
+
+  if (data.type === 'speech-end') {
+    if (data.id === currentId) finishTyping()
+    return
+  }
+
+  if (data.type === 'volume' && !draggingVolume) {
+    setVolumeDisplay(data.volume * 100)
+  }
+}
+</script>
+</body>
+</html>

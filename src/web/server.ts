@@ -5,12 +5,18 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { appendHistory, deleteHistoryLoop, nextStep, readHistory, renderEntries } from '../core/history.ts'
 import { findTrace } from '../core/trace.ts'
+import { renderMemoryAt } from '../core/memory.ts'
 import { runStep } from '../core/loop.ts'
+import { readVolume, writeVolume } from '../core/volume.ts'
+import { speechSnapshot, subscribeSpeech } from '../core/speech.ts'
 import { dueAlarms, nextAlarmText, readAlarms, removeAlarms } from '../tools/alarms.ts'
 import type { Config } from '../config.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const UI_FILE = join(HERE, 'ui.html')
+const STAGE_FILE = join(HERE, 'stage.html')
+const ELIO_FILE = join(HERE, '..', '..', 'assets', 'Elio.jpg')
+const ELIO_PNG_FILE = join(HERE, '..', '..', 'assets', 'Elio.png')
 
 export type ServerHandle = {
   /** 关掉服务器 */
@@ -47,6 +53,14 @@ export function startServer(config: Config): ServerHandle {
   const broadcast = (event: unknown) => {
     for (const client of [...clients]) send(client, event)
   }
+
+  // 语音开始/结束时推给舞台；
+  const unsubscribeSpeech = subscribeSpeech(event => {
+    broadcast({
+      ...event,
+      type: event.type === 'start' ? 'speech-start' : 'speech-end',
+    })
+  })
 
   const setState = (next: 'idle' | 'running') => {
     state = next
@@ -168,6 +182,90 @@ export function startServer(config: Config): ServerHandle {
       return
     }
 
+    // 舞台页
+    if (req.method === 'GET' && path === '/stage') {
+      let html: string
+      try {
+        html = readFileSync(STAGE_FILE, 'utf8')
+      } catch {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' })
+        res.end('找不到 stage.html')
+        return
+      }
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+      })
+      res.end(html)
+      return
+    }
+
+    // 舞台人物图
+    if (req.method === 'GET' && (path === '/assets/elio.jpg' || path === '/assets/Elio.jpg')) {
+      let image: Buffer
+      try {
+        image = readFileSync(ELIO_FILE)
+      } catch {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+        res.end('找不到 Elio.jpg')
+        return
+      }
+      res.writeHead(200, {
+        'Content-Type': 'image/jpeg',
+        'Cache-Control': 'no-cache',
+      })
+      res.end(image)
+      return
+    }
+
+    // 舞台人物图（透明版）
+    if (req.method === 'GET' && (path === '/assets/elio.png' || path === '/assets/Elio.png')) {
+      let image: Buffer
+      try {
+        image = readFileSync(ELIO_PNG_FILE)
+      } catch {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+        res.end('找不到 Elio.png')
+        return
+      }
+      res.writeHead(200, {
+        'Content-Type': 'image/png',
+        'Cache-Control': 'no-cache',
+      })
+      res.end(image)
+      return
+    }
+
+    // 音量
+    if (req.method === 'GET' && path === '/volume') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ volume: readVolume(config.dataDir) }))
+      return
+    }
+
+    if (req.method === 'POST' && path === '/volume') {
+      const body = await readBody(req)
+      let volume: number | null = null
+      try {
+        const parsed = JSON.parse(body) as { volume?: unknown }
+        if (typeof parsed.volume === 'number') volume = parsed.volume
+      } catch {
+        // 下面统一报错
+      }
+
+      if (volume === null || !Number.isFinite(volume) || volume < 0 || volume > 1) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: 'volume 要在 0–1 之间' }))
+        return
+      }
+
+      const saved = writeVolume(config.dataDir, volume)
+      broadcast({ type: 'volume', volume: saved })
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ ok: true, volume: saved }))
+      return
+    }
+
     // 全部历史
     if (req.method === 'GET' && path === '/history') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
@@ -189,11 +287,24 @@ export function startServer(config: Config): ServerHandle {
         return
       }
 
-      // 重建当时的 messages：历史按条数取，感知缓存用存下来的
+      // 重建当时的 messages：历史按条数取，记忆按版本回放，感知缓存用存下来的
       const entries = readHistory(config.dataDir).slice(0, record.historyCount)
       const historyText = renderEntries(entries)
+
+      let memoryText: string | null = null
+      let memoryShort = false
+      if (record.memoryRev !== undefined) {
+        try {
+          memoryText = renderMemoryAt(config.dataDir, record.memoryRev)
+        } catch {
+          memoryText = '【记忆文档】（回放失败）'
+          memoryShort = true
+        }
+      }
+
       const messages: Array<{ role: 'user', content: string }> = []
       if (historyText) messages.push({ role: 'user', content: historyText })
+      if (memoryText !== null) messages.push({ role: 'user', content: memoryText })
       messages.push({ role: 'user', content: record.perception })
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
@@ -206,8 +317,12 @@ export function startServer(config: Config): ServerHandle {
         messages,
         response: record.response,
         historyCount: record.historyCount,
+        memoryRev: record.memoryRev,
+        memoryTokens: record.memoryTokens,
+        memoryChange: record.memoryChange,
         // 历史被压缩过、条数不够时提示一下
         historyShort: entries.length < record.historyCount,
+        memoryShort,
       }))
       return
     }
@@ -222,7 +337,12 @@ export function startServer(config: Config): ServerHandle {
       res.flushHeaders?.()
       res.write('retry: 3000\n\n')
       clients.add(res)
-      send(res, { type: 'state', state })
+      send(res, {
+        type: 'state',
+        state,
+        volume: readVolume(config.dataDir),
+        speech: speechSnapshot(),
+      })
 
       // 心跳：防止代理/系统把长连接当死连接掐掉
       const ping = setInterval(() => {
@@ -318,6 +438,7 @@ export function startServer(config: Config): ServerHandle {
 
   return {
     close: () => new Promise<void>(resolve => {
+      unsubscribeSpeech()
       if (timer) clearTimeout(timer)
       for (const client of clients) client.end()
       clients.clear()

@@ -1,9 +1,10 @@
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { registerTool } from '../registries/tools.ts'
 import { loadConfig, type TtsConfig } from '../config.ts'
 import { finishSpeech, queueSpeech, startSpeech } from '../core/speech.ts'
+import { readVolume } from '../core/volume.ts'
 
 /**
  * 说话：把一句话交给 Fish Audio 合成，然后在本机播放。
@@ -94,9 +95,27 @@ async function synthesize(text: string, config: TtsConfig, dir: string): Promise
   return outputPath
 }
 
-function play(path: string): Promise<void> {
+/** 用 afinfo 读 mp3 时长；失败就按字数估一个 */
+function probeDuration(path: string, text: string): number {
+  try {
+    const info = execFileSync('afinfo', [path], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    const matched = /estimated duration:\s*([\d.]+)\s*sec/i.exec(info)
+    if (matched) {
+      const ms = Number(matched[1]) * 1000
+      if (Number.isFinite(ms) && ms > 0) return Math.round(ms)
+    }
+  } catch {
+    // 读不到就按字数估
+  }
+  return Math.max(800, Math.round([...text].length * 180))
+}
+
+function play(path: string, volume: number): Promise<void> {
   return new Promise(resolve => {
-    const child = spawn('afplay', [path], { stdio: 'ignore' })
+    const child = spawn('afplay', ['-v', String(volume), path], { stdio: 'ignore' })
     child.on('error', () => resolve())
     child.on('close', () => resolve())
   })
@@ -121,7 +140,9 @@ type SayItem = {
   id: number
   text: string
   path: string
+  dataDir: string
   dir: string
+  durationMs: number
 }
 
 const queue: SayItem[] = []
@@ -129,10 +150,10 @@ let nextId = 1
 let pumping = false
 
 /** 入队后串行播放；开始/结束时同步给感知缓存 */
-function enqueue(text: string, path: string, dir: string): void {
-  const item: SayItem = { id: nextId++, text, path, dir }
+function enqueue(text: string, path: string, dataDir: string, dir: string, durationMs: number): void {
+  const item: SayItem = { id: nextId++, text, path, dataDir, dir, durationMs }
   queue.push(item)
-  queueSpeech(item.id, item.text)
+  queueSpeech(item.id, item.text, item.durationMs)
   void pump().catch(() => undefined)
 }
 
@@ -143,9 +164,10 @@ async function pump(): Promise<void> {
   try {
     while (queue.length > 0) {
       const item = queue.shift()!
-      startSpeech(item.id, item.text)
+      const volume = readVolume(item.dataDir)
+      startSpeech(item.id, item.text, item.durationMs)
       try {
-        await play(item.path)
+        await play(item.path, volume)
       } finally {
         finishSpeech(item.id)
         // 等整条队列播完再清理，避免删掉还没播的文件
@@ -192,7 +214,8 @@ registerTool({
 
     const dir = ttsDir(ctx.dataDir)
     const path = await synthesize(text, config, dir)
-    enqueue(text, path, dir)
+    const durationMs = probeDuration(path, text)
+    enqueue(text, path, ctx.dataDir, dir, durationMs)
 
     return '成功'
   },

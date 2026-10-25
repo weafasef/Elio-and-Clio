@@ -34,6 +34,13 @@
   header h1 { margin: 0; font-size: 15px; font-weight: 600; }
   #state { font-size: 12px; color: var(--dim); }
   #state.running { color: var(--accent); }
+  .stage-link {
+    margin-left: auto;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 12px;
+  }
+  .stage-link:hover { text-decoration: underline; }
 
 
   main {
@@ -191,6 +198,7 @@
 <header>
   <h1>EH</h1>
   <span id="state">连接中…</span>
+  <a class="stage-link" href="/stage" target="_blank" rel="noreferrer">舞台 ↗</a>
 </header>
 
 <main id="list">
@@ -343,7 +351,19 @@ async function openTrace(step, loop) {
     drawerBody.append(warn)
   }
 
+  if (record.memoryShort) {
+    const warn = el('pre')
+    warn.textContent = '注意：记忆回放失败；完整内容仍在 memory/ 里'
+    drawerBody.append(warn)
+  }
+
   drawerBody.append(section('请求 · system 提示词', system))
+  if (record.memoryRev !== undefined) {
+    const note = `rev ${record.memoryRev}` +
+      (record.memoryTokens ? ` · 约 ${record.memoryTokens} token` : '') +
+      (record.memoryChange ? `\n${record.memoryChange}` : '')
+    drawerBody.append(section('请求 · 记忆版本', note))
+  }
   messages.forEach((message, index) => {
     drawerBody.append(section(`请求 · messages[${index}] (${message.role})`, message.content))
   })
