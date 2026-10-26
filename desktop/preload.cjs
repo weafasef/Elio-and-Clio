@@ -18,6 +18,15 @@ contextBridge.exposeInMainWorld('ehPet', {
   onUiState(callback) {
     ipcRenderer.on('pet:ui-state', (_event, state) => callback(state))
   },
+  getShortcuts() {
+    return ipcRenderer.invoke('pet:get-shortcuts')
+  },
+  saveShortcuts(shortcuts) {
+    return ipcRenderer.invoke('pet:save-shortcuts', shortcuts)
+  },
+  closeShortcuts() {
+    ipcRenderer.send('pet:close-shortcuts')
+  },
   retry() {
     ipcRenderer.send('pet:retry')
   },

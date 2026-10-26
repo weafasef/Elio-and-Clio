@@ -13,10 +13,25 @@ const MIN_SCALE = 0.7
 const MAX_SCALE = 1.15
 const OFFLINE_FILE = path.join(__dirname, 'offline.html')
 const OFFLINE_URL = pathToFileURL(OFFLINE_FILE).href
+const SHORTCUTS_FILE = path.join(__dirname, 'shortcuts.html')
 const TRAY_ICON = path.join(__dirname, 'trayTemplate.png')
-const SHORTCUT = 'CommandOrControl+Shift+E'
+
+const SHORTCUT_LABELS = {
+  toggleClickThrough: '点击穿透',
+  toggleWindow: '显示/隐藏 Elio',
+  toggleTextControls: '显示文字和进度条',
+  toggleComposer: '显示输入框',
+}
+
+const DEFAULT_SHORTCUTS = {
+  toggleClickThrough: 'CommandOrControl+Shift+E',
+  toggleWindow: 'CommandOrControl+Shift+H',
+  toggleTextControls: 'CommandOrControl+Shift+U',
+  toggleComposer: 'CommandOrControl+Shift+I',
+}
 
 let win = null
+let settingsWin = null
 let tray = null
 let isQuitting = false
 let rendererIgnoreMouse = false
@@ -24,10 +39,13 @@ let screenshotDone = false
 let dragState = null
 let dragTimer = null
 let dragSafety = null
+let registeredShortcuts = {}
+let shortcutErrors = []
 let settings = {
   showTextAndControls: true,
   showComposer: true,
   clickThrough: true,
+  shortcuts: { ...DEFAULT_SHORTCUTS },
 }
 
 const gotLock = app.requestSingleInstanceLock()
@@ -51,7 +69,7 @@ if (!gotLock) {
       callback(false)
     })
 
-    registerShortcut()
+    applyShortcuts()
     createTray()
     createWindow()
 
@@ -222,10 +240,18 @@ function settingsFile() {
 function loadSettings() {
   try {
     const raw = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'))
+    const rawShortcuts = raw.shortcuts && typeof raw.shortcuts === 'object' ? raw.shortcuts : {}
+    const shortcuts = {}
+    for (const key of Object.keys(DEFAULT_SHORTCUTS)) {
+      shortcuts[key] = typeof rawShortcuts[key] === 'string'
+        ? rawShortcuts[key]
+        : DEFAULT_SHORTCUTS[key]
+    }
     settings = {
       showTextAndControls: raw.showTextAndControls !== false,
       showComposer: raw.showComposer !== false,
       clickThrough: raw.clickThrough !== false,
+      shortcuts,
     }
   } catch {
     // 没有配置就用默认值
@@ -324,17 +350,193 @@ function resetWindowPosition() {
   if (!win.isVisible()) win.showInactive()
 }
 
-function registerShortcut() {
-  const registered = globalShortcut.register(SHORTCUT, () => {
-    settings.clickThrough = !settings.clickThrough
-    saveSettings()
-    sendUiState()
-    applyMouseIgnore()
-    rebuildTrayMenu()
-  })
-  if (!registered) {
-    console.warn(`[pet] shortcut not registered: ${SHORTCUT}`)
+function toggleClickThrough() {
+  settings.clickThrough = !settings.clickThrough
+  saveSettings()
+  sendUiState()
+  applyMouseIgnore()
+  rebuildTrayMenu()
+}
+
+function toggleTextControls() {
+  settings.showTextAndControls = !settings.showTextAndControls
+  saveSettings()
+  sendUiState()
+  rebuildTrayMenu()
+}
+
+function toggleComposer() {
+  settings.showComposer = !settings.showComposer
+  saveSettings()
+  sendUiState()
+  rebuildTrayMenu()
+}
+
+function unregisterAllShortcuts() {
+  for (const accelerator of Object.values(registeredShortcuts)) {
+    try {
+      if (accelerator) globalShortcut.unregister(accelerator)
+    } catch {
+      // 忽略未注册成功的组合
+    }
   }
+  registeredShortcuts = {}
+}
+
+function validateShortcut(accelerator) {
+  if (!accelerator) return ''
+  const parts = accelerator.split('+')
+  const modifiers = parts.slice(0, -1)
+  if (parts.length < 2) return '需要修饰键和一个按键'
+  if (!modifiers.some(modifier => ['Command', 'Control', 'Alt', 'CommandOrControl', 'Super'].includes(modifier))) {
+    return '至少需要 Command、Control 或 Alt'
+  }
+  return ''
+}
+
+function applyShortcuts() {
+  unregisterAllShortcuts()
+  const errors = []
+  const seen = new Map()
+
+  for (const [action, label] of Object.entries(SHORTCUT_LABELS)) {
+    const accelerator = String(settings.shortcuts[action] ?? '').trim()
+    if (!accelerator) continue
+
+    const validation = validateShortcut(accelerator)
+    if (validation) {
+      errors.push(`${label}：${validation}`)
+      continue
+    }
+    if (seen.has(accelerator)) {
+      errors.push(`${label}：与「${SHORTCUT_LABELS[seen.get(accelerator)]}」重复`)
+      continue
+    }
+    seen.set(accelerator, action)
+
+    let registered = false
+    try {
+      registered = globalShortcut.register(accelerator, shortcutActions[action])
+    } catch {
+      registered = false
+    }
+    if (registered) registeredShortcuts[action] = accelerator
+    else errors.push(`${label}：${accelerator} 注册失败，可能被其他应用占用`)
+  }
+
+  shortcutErrors = errors
+  if (process.env.EH_PET_DEBUG) {
+    console.log('[pet] shortcuts:', registeredShortcuts, errors)
+  }
+  return errors
+}
+
+const shortcutActions = {
+  toggleClickThrough,
+  toggleWindow: () => toggleWindow(),
+  toggleTextControls,
+  toggleComposer,
+}
+
+function testShortcuts(shortcuts) {
+  const errors = []
+  const registered = []
+  const seen = new Map()
+
+  for (const [action, label] of Object.entries(SHORTCUT_LABELS)) {
+    const accelerator = String(shortcuts[action] ?? '').trim()
+    if (!accelerator) continue
+
+    const validation = validateShortcut(accelerator)
+    if (validation) {
+      errors.push(`${label}：${validation}`)
+      continue
+    }
+    if (seen.has(accelerator)) {
+      errors.push(`${label}：与「${SHORTCUT_LABELS[seen.get(accelerator)]}」重复`)
+      continue
+    }
+    seen.set(accelerator, action)
+
+    let ok = false
+    try {
+      ok = globalShortcut.register(accelerator, () => undefined)
+    } catch {
+      ok = false
+    }
+    if (ok) registered.push(accelerator)
+    else errors.push(`${label}：${accelerator} 注册失败，可能被其他应用占用`)
+  }
+
+  for (const accelerator of registered) {
+    try { globalShortcut.unregister(accelerator) } catch { /* 忽略 */ }
+  }
+  return errors
+}
+
+function saveShortcutSettings(input) {
+  const next = {}
+  for (const key of Object.keys(DEFAULT_SHORTCUTS)) {
+    next[key] = input && typeof input[key] === 'string' ? input[key].trim() : ''
+  }
+
+  const errors = testShortcuts(next)
+  if (errors.length > 0) {
+    return { ok: false, error: errors.join('\n') }
+  }
+
+  settings.shortcuts = next
+  saveSettings()
+  rebuildTrayMenu()
+  return { ok: true, shortcuts: { ...next } }
+}
+
+function openShortcutSettings() {
+  if (settingsWin) {
+    settingsWin.show()
+    settingsWin.focus()
+    return
+  }
+
+  // 录制时先停掉所有全局快捷键，避免按到旧组合就触发动作
+  unregisterAllShortcuts()
+  shortcutErrors = []
+
+  settingsWin = new BrowserWindow({
+    width: 560,
+    height: 520,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    show: false,
+    title: '快捷键设置',
+    backgroundColor: '#11131a',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      spellcheck: false,
+    },
+  })
+  settingsWin.setMenuBarVisibility(false)
+  settingsWin.center()
+  settingsWin.once('ready-to-show', () => {
+    if (!settingsWin) return
+    settingsWin.show()
+    settingsWin.focus()
+  })
+  settingsWin.on('closed', () => {
+    settingsWin = null
+    if (!isQuitting) {
+      shortcutErrors = applyShortcuts()
+      rebuildTrayMenu()
+    }
+  })
+  settingsWin.loadFile(SHORTCUTS_FILE).catch(error => {
+    if (process.env.EH_PET_DEBUG) console.error('[pet] shortcuts window load failed:', error.message)
+  })
 }
 
 function createTray() {
@@ -392,6 +594,10 @@ function rebuildTrayMenu() {
         rebuildTrayMenu()
       },
     },
+    {
+      label: '设置快捷键…',
+      click: openShortcutSettings,
+    },
     { type: 'separator' },
     {
       label: '重新连接',
@@ -441,6 +647,17 @@ ipcMain.on('pet:set-scale', (event, percent) => {
 ipcMain.on('pet:retry', event => {
   if (!win || event.sender !== win.webContents) return
   loadStage()
+})
+
+ipcMain.handle('pet:get-shortcuts', () => ({
+  shortcuts: { ...settings.shortcuts },
+  errors: [...shortcutErrors],
+}))
+
+ipcMain.handle('pet:save-shortcuts', (_event, input) => saveShortcutSettings(input))
+
+ipcMain.on('pet:close-shortcuts', () => {
+  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.close()
 })
 
 function captureForDebug() {

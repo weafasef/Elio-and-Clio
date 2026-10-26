@@ -280,8 +280,14 @@
   }
   html.pet.hide-text-controls .dialogue,
   html.pet.hide-text-controls .pet-controls {
-    visibility: hidden;
-    pointer-events: none;
+    display: none;
+  }
+  html.pet.hide-text-controls .stage {
+    grid-template-rows: var(--pet-locked-portrait-height) auto minmax(0, 1fr);
+  }
+  html.pet.hide-text-controls .portrait {
+    height: var(--pet-locked-portrait-height);
+    max-height: none;
   }
   html.pet.hide-composer .composer {
     visibility: hidden;
@@ -807,7 +813,12 @@ if (petMode && petBridge) {
   if (petBridge?.onUiState) {
     petBridge.onUiState(state => {
       autoClickThrough = state?.clickThrough !== false
-      document.documentElement.classList.toggle('hide-text-controls', state?.showTextAndControls === false)
+      const hideTextControls = state?.showTextAndControls === false
+      if (hideTextControls && !document.documentElement.classList.contains('hide-text-controls')) {
+        const height = portraitEl?.offsetHeight || Math.round(innerHeight * 0.5)
+        document.documentElement.style.setProperty('--pet-locked-portrait-height', `${height}px`)
+      }
+      document.documentElement.classList.toggle('hide-text-controls', hideTextControls)
       document.documentElement.classList.toggle('hide-composer', state?.showComposer === false)
       if (state?.showComposer === false && document.activeElement === inputEl) inputEl.blur()
     })
