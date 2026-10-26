@@ -111,6 +111,8 @@ function createWindow() {
     y,
     width: BASE_WIDTH,
     height: BASE_HEIGHT,
+    type: 'panel',
+    focusable: true,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -135,18 +137,14 @@ function createWindow() {
   })
 
   win.setAlwaysOnTop(true, 'floating')
-  win.setVisibleOnAllWorkspaces(true, {
-    visibleOnFullScreen: true,
-    skipTransformProcessType: true,
-  })
 
   win.once('ready-to-show', () => {
     if (!win) return
     win.showInactive()
     if (process.env.EH_PET_DEBUG) {
       console.log('[pet] window:', win.getBounds())
+      console.log('[pet] window type:', 'panel')
       console.log('[pet] always on top:', win.isAlwaysOnTop())
-      console.log('[pet] all workspaces:', win.isVisibleOnAllWorkspaces())
       console.log('[pet] dock visible:', process.platform === 'darwin' ? app.dock.isVisible() : 'n/a')
     }
     captureForDebug()
