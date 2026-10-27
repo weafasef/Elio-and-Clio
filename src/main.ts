@@ -8,6 +8,7 @@ import './tools/persona.ts'
 import './tools/memory.ts'
 import './tools/say.ts'
 import './tools/screenshot.ts'
+import './tools/camera/camera.ts'
 import { startServer } from './web/server.ts'
 
 const config = loadConfig()

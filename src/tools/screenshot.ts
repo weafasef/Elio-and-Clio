@@ -125,7 +125,7 @@ registerTool({
 
       writeFileSync(
         metaTmp,
-        JSON.stringify({ at: stamp(now), width, height }, null, 2) + '\n',
+        JSON.stringify({ at: stamp(now), width, height, source: 'screen' }, null, 2) + '\n',
         'utf8',
       )
       renameSync(metaTmp, meta)
@@ -143,7 +143,7 @@ registerTool({
 
 registerTool({
   name: 'screenshot_clear',
-  description: '把截图从感知缓存里去掉。画面看完了、不需要继续带着时用。',
+  description: '把当前画面（截图或照片）从感知缓存里去掉。看完了、不需要继续带着时用。',
   parameters: {
     type: 'object',
     properties: {},
@@ -161,6 +161,6 @@ registerTool({
       }
     }
 
-    return removed ? '截图已从感知里去掉' : '感知里本来就没有截图'
+    return removed ? '画面已从感知里去掉' : '感知里本来就没有画面'
   },
 })

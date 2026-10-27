@@ -61,7 +61,7 @@ export function assemble(input: AssembleInput): AssembleResult {
     provided: input.provided,
   })
 
-  // 最近一次截图：和感知缓存一起发，图片本身不进历史
+  // 最近一次画面：屏幕截图或摄像头照片，和感知缓存一起发，图片本身不进历史
   const shotDir = join(input.dataDir, 'screenshots')
   const imagePath = join(shotDir, 'latest.jpg')
   const metaPath = join(shotDir, 'latest.json')
@@ -80,10 +80,12 @@ export function assemble(input: AssembleInput): AssembleResult {
         at?: string
         width?: number
         height?: number
+        source?: string
       }
       if (meta.at) {
         const size = meta.width && meta.height ? `（${meta.width}×${meta.height}）` : ''
-        perception += `\n- 最近一次截图：${meta.at}${size}`
+        const label = meta.source === 'camera' ? '照片' : '截图'
+        perception += `\n- 最近一次${label}：${meta.at}${size}`
       }
     } catch {
       // 没有 latest.json 就不写时间
