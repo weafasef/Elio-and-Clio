@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, screen, shell, session, globalShortcut } = require('electron')
+const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, screen, shell, session, globalShortcut, powerMonitor } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
@@ -34,6 +34,7 @@ let win = null
 let settingsWin = null
 let tray = null
 let isQuitting = false
+let windowHiddenByUser = false
 let rendererIgnoreMouse = false
 let screenshotDone = false
 let dragState = null
@@ -72,6 +73,16 @@ if (!gotLock) {
     applyShortcuts()
     createTray()
     createWindow()
+
+    if (process.platform === 'darwin') {
+      const restoreAfterWake = () => {
+        restoreWindowPresence()
+        setTimeout(restoreWindowPresence, 1_000)
+        setTimeout(restoreWindowPresence, 3_000)
+      }
+      powerMonitor.on('resume', restoreAfterWake)
+      powerMonitor.on('unlock-screen', restoreAfterWake)
+    }
 
     app.on('activate', () => {
       if (win) showWindow()
@@ -161,6 +172,7 @@ function createWindow() {
   win.on('close', event => {
     if (!isQuitting) {
       event.preventDefault()
+      windowHiddenByUser = true
       win.hide()
     }
   })
@@ -192,13 +204,37 @@ function createWindow() {
   loadStage()
 }
 
+function restoreWindowPresence() {
+  if (!win || win.isDestroyed()) return
+
+  win.setAlwaysOnTop(true, 'floating')
+  win.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true,
+  })
+
+  if (win.isMinimized()) win.restore()
+  if (!win.isVisible() && !windowHiddenByUser) win.showInactive()
+  else if (win.isVisible()) win.moveTop()
+
+  if (process.env.EH_PET_DEBUG) {
+    console.log('[pet] restore window presence:', {
+      visible: win.isVisible(),
+      hiddenByUser: windowHiddenByUser,
+      bounds: win.getBounds(),
+    })
+  }
+}
+
 function showWindow() {
   if (!win) {
     createWindow()
     return
   }
+  windowHiddenByUser = false
   win.show()
   win.focus()
+  restoreWindowPresence()
 }
 
 function toggleWindow() {
@@ -206,8 +242,13 @@ function toggleWindow() {
     createWindow()
     return
   }
-  if (win.isVisible()) win.hide()
-  else win.showInactive()
+  if (win.isVisible()) {
+    windowHiddenByUser = true
+    win.hide()
+  } else {
+    windowHiddenByUser = false
+    restoreWindowPresence()
+  }
 }
 
 function loadStage() {
@@ -345,7 +386,8 @@ function resetWindowPosition() {
   const x = Math.max(workArea.x, workArea.x + workArea.width - width - 24)
   const y = Math.max(workArea.y, workArea.y + workArea.height - height - 24)
   win.setPosition(Math.round(x), Math.round(y), false)
-  if (!win.isVisible()) win.showInactive()
+  windowHiddenByUser = false
+  restoreWindowPresence()
 }
 
 function toggleClickThrough() {
