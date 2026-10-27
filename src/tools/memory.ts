@@ -100,6 +100,53 @@ function oneLine(value: unknown, label: string): string {
   return text
 }
 
+/** 把「删除条目」的条号/原文转成 0 开始的索引 */
+function pickEntryIndexes(
+  entries: Array<{ text: string }>,
+  selection: unknown,
+  path: string,
+): number[] {
+  const picked: number[] = []
+
+  if (typeof selection === 'number') {
+    if (!Number.isInteger(selection)) throw new Error('删除条目的条号必须是整数')
+    picked.push(selection)
+  } else if (Array.isArray(selection)) {
+    if (selection.length === 0) throw new Error('删除条目的条号数组不能为空')
+    for (const item of selection) {
+      if (typeof item !== 'number' || !Number.isInteger(item)) {
+        throw new Error('删除条目的条号数组里只能是整数')
+      }
+      picked.push(item)
+    }
+  } else if (typeof selection === 'string') {
+    const needle = selection.trim()
+    if (!needle) throw new Error('删除条目的原文不能为空')
+    const hits = entries
+      .map((entry, index) => ({ entry, index }))
+      .filter(item => item.entry.text === needle)
+    if (hits.length === 0) throw new Error(`「${path}」里没有这一条：${needle}`)
+    if (hits.length > 1) {
+      const list = hits
+        .slice(0, 10)
+        .map(item => `${item.index + 1}. ${item.entry.text}`)
+        .join('\n')
+      throw new Error(`「${path}」里有 ${hits.length} 条完全相同，无法确定删哪一条：\n${list}`)
+    }
+    picked.push(hits[0]!.index + 1)
+  } else {
+    throw new Error('删除条目只能传条号、条号数组，或原文')
+  }
+
+  const unique = [...new Set(picked)]
+  for (const number of unique) {
+    if (number < 1 || number > entries.length) {
+      throw new Error(`条号 ${number} 不存在；「${path}」现在共 ${entries.length} 条`)
+    }
+  }
+  return unique.map(number => number - 1).sort((a, b) => a - b)
+}
+
 type Row = { path: string, visible: boolean, count: number, depth: number }
 
 function rowsOf(nodes: MemoryNode[], depth = 0, rows: Row[] = []): Row[] {
@@ -200,7 +247,7 @@ function commitMemory(
 registerTool({
   name: 'memory_edit',
   description:
-    '改我给自己的长期记忆。一次可以改多条：加一条、改写一条、把条目移到子段、清空某段、删段。' +
+    '改我给自己的长期记忆。一次可以改多条：加一条、改写一条、删一条、把条目移到子段、清空某段、删段。' +
     '路径用 / 分层，例如 读书/无职转生。新路径会自动补父段，默认隐藏。' +
     '所有条目都必须标来源，只能是「确定」或「猜想」。可见段每轮都会看到，隐藏段用 memory_read 查。',
   parameters: {
@@ -213,12 +260,13 @@ registerTool({
           type: 'object',
           properties: {
             路径: { type: 'string', description: '段的路径，例如 主人 或 读书/无职转生' },
-            正文: { type: 'string', description: '一条记忆；空字符串表示清空该段' },
-            改写: { type: 'string', description: '要替换的旧条目原文；多条完全相同会报错' },
+            正文: { type: 'string', description: '一条记忆；空字符串表示清空该段，不要和改写、删除条目同时用' },
+            改写: { type: 'string', description: '要替换的旧条目原文；正文不能为空；多条完全相同会报错' },
+            删除条目: { description: '删掉某一（几）条：条号（整数，从 1 开始）、条号数组，或原文（必须完全一致；重复会报错）' },
             移动: { description: '条号（整数）、条号数组，或一段文字（唯一命中时才移动）' },
             到: { type: 'string', description: '移动的目标路径' },
             来源: { type: 'string', enum: ['确定', '猜想'] },
-            删除: { type: 'boolean', description: 'true = 删掉这一段' },
+            删除: { type: 'boolean', description: 'true = 删掉整段（不是删一条）' },
             递归: { type: 'boolean', description: '删有子段的段时必须传 true' },
           },
           required: ['路径'],
@@ -274,6 +322,23 @@ registerTool({
         for (const item of removed) content.delete(item)
 
         notes.push(`已删除：${path}${children.length > 0 ? `（含 ${children.length} 个子段）` : ''}，共 ${count} 条`)
+        continue
+      }
+
+      // 删掉一（几）条，段本身保留
+      if (edit.删除条目 !== undefined) {
+        if (edit.正文 !== undefined || edit.改写 !== undefined || edit.移动 !== undefined) {
+          throw new Error('「删除条目」不能和「正文」「改写」「移动」同时用')
+        }
+
+        const source = content.get(path)
+        if (!source || source.length === 0) throw new Error(`「${path}」没有条目可删`)
+
+        const indexes = pickEntryIndexes(source, edit.删除条目, path)
+        const remove = new Set(indexes)
+        content.set(path, source.filter((_, index) => !remove.has(index)))
+        touched.add(path)
+        notes.push(`删除了「${path}」的 ${indexes.length} 条`)
         continue
       }
 
@@ -346,6 +411,9 @@ registerTool({
       if (/[\r\n]/.test(body)) throw new Error('正文里不能换行')
 
       if (body === '') {
+        if (edit.改写 !== undefined) {
+          throw new Error('要删一条请用「删除条目」；「改写」的正文不能为空')
+        }
         if (!hasPath(lines, content, path)) throw new Error(`没有这一段：${path}`)
         content.set(path, [])
         touched.add(path)

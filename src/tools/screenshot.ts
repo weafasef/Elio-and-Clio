@@ -12,14 +12,15 @@ import { join } from 'node:path'
 import { registerTool } from '../registries/tools.ts'
 
 /**
- * 截图：截主屏 → 缩到 640 宽 → 放进 screenshots/latest.jpg
+ * 截图：截主屏 → 缩到最长边 1280 → 放进 screenshots/latest.jpg
  *
  * 感知缓存每轮读 latest.jpg，所以截完就一直在她眼前，
  * 直到 screenshot_clear 或下一张截图。
  */
 
 const KEEP_SHOTS = 10
-const MAX_WIDTH = 640
+const MAX_WIDTH = 1280
+const JPEG_QUALITY = 90
 
 function stamp(date = new Date()): string {
   const pad = (value: number) => String(value).padStart(2, '0')
@@ -80,7 +81,7 @@ function prune(dir: string): void {
 registerTool({
   name: 'screenshot',
   description:
-    '截取当前主屏（640×400），放进我的感知缓存。' +
+    '截取当前主屏（最长边 1280），放进我的感知缓存。' +
     '主人问屏幕上的内容、或者我需要看当前画面时用。' +
     '截完会一直看得见，直到 screenshot_clear 或下一张截图。',
   parameters: {
@@ -109,7 +110,7 @@ registerTool({
       run('/usr/bin/sips', [
         '-Z', String(MAX_WIDTH),
         '-s', 'format', 'jpeg',
-        '-s', 'formatOptions', '80',
+        '-s', 'formatOptions', String(JPEG_QUALITY),
         raw,
         '--out', shot,
       ])

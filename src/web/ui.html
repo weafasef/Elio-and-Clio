@@ -34,13 +34,29 @@
   header h1 { margin: 0; font-size: 15px; font-weight: 600; }
   #state { font-size: 12px; color: var(--dim); }
   #state.running { color: var(--accent); }
-  .stage-link {
+  .header-actions {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .stage-link {
     color: var(--accent);
     text-decoration: none;
     font-size: 12px;
   }
   .stage-link:hover { text-decoration: underline; }
+  .header-btn {
+    padding: 2px 9px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .header-btn:hover { border-color: var(--accent); }
 
 
   main {
@@ -192,13 +208,69 @@
     word-break: break-word;
     font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
   }
+  .memory-legend {
+    margin-bottom: 12px;
+    color: var(--dim);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .memory-section {
+    margin-bottom: 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .memory-section.is-hidden { border-style: dashed; opacity: .82; }
+  .memory-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: #1c1d22;
+    font-size: 12px;
+  }
+  .memory-path { font-weight: 600; color: var(--text); }
+  .memory-badge {
+    padding: 0 6px;
+    border: 1px solid;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 18px;
+  }
+  .memory-badge.visible {
+    color: #9ece6a;
+    background: #1f2a1b;
+    border-color: #3d5a32;
+  }
+  .memory-badge.hidden {
+    color: #e0af68;
+    background: #2a241b;
+    border-color: #5a4a32;
+  }
+  .memory-count { margin-left: auto; color: var(--dim); }
+  .memory-entries { padding: 3px 10px 7px; }
+  .memory-entry {
+    padding: 4px 0;
+    border-top: 1px dashed rgba(255,255,255,.06);
+    font-size: 13px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .memory-entry:first-child { border-top: 0; }
+  .memory-source { margin-right: 6px; font-size: 11px; color: var(--dim); }
+  .memory-source.确定 { color: #9ece6a; }
+  .memory-source.猜想 { color: #e0af68; }
+  .memory-empty { padding: 4px 0; color: var(--dim); font-size: 12px; }
 </style>
 </head>
 <body>
 <header>
   <h1>EH</h1>
   <span id="state">连接中…</span>
-  <a class="stage-link" href="/stage" target="_blank" rel="noreferrer">舞台 ↗</a>
+  <div class="header-actions">
+    <button id="memory-btn" class="header-btn" type="button">记忆</button>
+    <a class="stage-link" href="/stage" target="_blank" rel="noreferrer">舞台 ↗</a>
+  </div>
 </header>
 
 <main id="list">
@@ -230,6 +302,7 @@ const drawerTitle = document.getElementById('drawer-title')
 const drawerBody = document.getElementById('drawer-body')
 const drawerClose = document.getElementById('drawer-close')
 const stopBtn = document.getElementById('stop')
+const memoryBtn = document.getElementById('memory-btn')
 
 let running = false
 
@@ -375,6 +448,66 @@ async function openTrace(step, loop) {
   drawerBody.append(section('响应 · 其他', `finish: ${response.finishReason}\nusage: ${JSON.stringify(response.usage ?? null)}`))
 }
 
+async function openMemory() {
+  drawerTitle.textContent = '记忆'
+  drawerBody.replaceChildren()
+  drawer.hidden = false
+
+  let data
+  try {
+    const res = await fetch('/memory')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    data = await res.json()
+  } catch (error) {
+    const pre = el('pre')
+    pre.textContent = `读取记忆失败：${error instanceof Error ? error.message : String(error)}`
+    drawerBody.append(pre)
+    return
+  }
+
+  drawerTitle.textContent = `记忆 · rev ${data.rev} · 约 ${data.tokens} token`
+  const legend = el('div', 'memory-legend')
+  legend.textContent = '显示 = 每轮进入上下文；隐藏 = 只留标题和条数，需要 memory_read。'
+  drawerBody.append(legend)
+
+  for (const section of data.sections) {
+    const box = el('div', 'memory-section')
+    if (!section.visible) box.classList.add('is-hidden')
+
+    const head = el('div', 'memory-head')
+    head.style.paddingLeft = `${10 + section.depth * 14}px`
+
+    const path = el('span', 'memory-path')
+    path.textContent = section.path
+
+    const badge = el('span', 'memory-badge ' + (section.visible ? 'visible' : 'hidden'))
+    badge.textContent = section.visible ? '显示' : '隐藏'
+
+    const count = el('span', 'memory-count')
+    count.textContent = `${section.count} 条`
+
+    head.append(path, badge, count)
+
+    const entries = el('div', 'memory-entries')
+    if (section.entries.length === 0) {
+      const empty = el('div', 'memory-empty')
+      empty.textContent = '（空）'
+      entries.append(empty)
+    } else {
+      for (const entry of section.entries) {
+        const row = el('div', 'memory-entry')
+        const source = el('span', 'memory-source ' + entry.source)
+        source.textContent = `[${entry.source}]`
+        row.append(source, document.createTextNode(entry.text))
+        entries.append(row)
+      }
+    }
+
+    box.append(head, entries)
+    drawerBody.append(box)
+  }
+}
+
 function section(title, body) {
   const wrap = document.createDocumentFragment()
   const h = el('h3'); h.textContent = title
@@ -384,6 +517,7 @@ function section(title, body) {
 }
 
 drawerClose.addEventListener('click', () => { drawer.hidden = true })
+memoryBtn.addEventListener('click', openMemory)
 
 const events = new EventSource('/events')
 

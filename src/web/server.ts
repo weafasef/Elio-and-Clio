@@ -5,7 +5,15 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { appendHistory, deleteHistoryLoop, nextStep, readHistory, renderEntries } from '../core/history.ts'
 import { findTrace } from '../core/trace.ts'
-import { renderMemoryAt } from '../core/memory.ts'
+import {
+  buildTree,
+  normalizeLines,
+  readContent,
+  readSkeletonLines,
+  renderMemory,
+  renderMemoryAt,
+  type MemoryNode,
+} from '../core/memory.ts'
 import { runStep } from '../core/loop.ts'
 import { readVolume, writeVolume } from '../core/volume.ts'
 import { speechSnapshot, subscribeSpeech } from '../core/speech.ts'
@@ -18,6 +26,29 @@ const STAGE_FILE = join(HERE, 'stage.html')
 const ELIO_FILE = join(HERE, '..', '..', 'assets', 'Elio.jpg')
 const ELIO_PNG_FILE = join(HERE, '..', '..', 'assets', 'Elio.png')
 
+type MemoryViewRow = {
+  path: string
+  depth: number
+  visible: boolean
+  count: number
+  entries: Array<{ source: string, text: string }>
+}
+
+/** 把记忆树压成网页好渲染的列表；隐藏段也保留正文，只在界面上标注 */
+function flattenMemory(nodes: MemoryNode[], depth = 0, rows: MemoryViewRow[] = []): MemoryViewRow[] {
+  for (const node of nodes) {
+    rows.push({
+      path: node.path,
+      depth,
+      visible: node.visible,
+      count: node.entries.length,
+      entries: node.entries.map(entry => ({ source: entry.source, text: entry.text })),
+    })
+    flattenMemory(node.children, depth + 1, rows)
+  }
+  return rows
+}
+
 export type ServerHandle = {
   /** 关掉服务器 */
   close: () => Promise<void>
@@ -28,6 +59,7 @@ export type ServerHandle = {
  *
  *   GET  /          页面
  *   GET  /history   全部历史（JSON）
+ *   GET  /memory    当前记忆树（JSON，含显示/隐藏）
  *   GET  /events    SSE：state / text / tool / loop / done
  *   POST /say       主人说一句（进队列，等当前这步结束再唤醒）
  */
@@ -270,6 +302,23 @@ export function startServer(config: Config): ServerHandle {
     if (req.method === 'GET' && path === '/history') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify(readHistory(config.dataDir)))
+      return
+    }
+
+    // 当前记忆树：显示/隐藏、条目和版本；隐藏段也返回正文供查看
+    if (req.method === 'GET' && path === '/memory') {
+      const content = readContent(config.dataDir)
+      const lines = normalizeLines(readSkeletonLines(config.dataDir), content)
+      const memory = renderMemory(config.dataDir)
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+      })
+      res.end(JSON.stringify({
+        rev: memory.rev,
+        tokens: memory.tokens,
+        sections: flattenMemory(buildTree(lines, content)),
+      }))
       return
     }
 
