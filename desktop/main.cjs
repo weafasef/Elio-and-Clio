@@ -45,10 +45,15 @@ let shortcutErrors = []
 let presenceWatchTimer = null
 let lastIdleSeconds = 0
 let lastPresenceCheckAt = 0
+let pendingWindowBounds = null
+let presenceResetInFlight = false
+let lastWindowResetAt = 0
 const IDLE_RETURN_THRESHOLD_S = 60
 const IDLE_ACTIVE_THRESHOLD_S = 10
 const IDLE_POLL_MS = 5_000
 const IDLE_TIMER_GAP_MS = 15_000
+const ALARM_SAFE_MS = 3 * 60_000
+const WINDOW_RESET_COOLDOWN_MS = 60_000
 let settings = {
   showTextAndControls: true,
   showComposer: true,
@@ -112,8 +117,15 @@ if (!gotLock) {
     if (process.platform === 'darwin') {
       const restoreAfterWake = () => {
         restoreWindowPresence()
-        setTimeout(restoreWindowPresence, 1_000)
-        setTimeout(restoreWindowPresence, 3_000)
+        void restartPetWindowIfIdle()
+        setTimeout(() => {
+          restoreWindowPresence()
+          void restartPetWindowIfIdle()
+        }, 1_000)
+        setTimeout(() => {
+          restoreWindowPresence()
+          void restartPetWindowIfIdle()
+        }, 3_000)
       }
       powerMonitor.on('resume', restoreAfterWake)
       powerMonitor.on('unlock-screen', restoreAfterWake)
@@ -187,10 +199,16 @@ function createWindow() {
     },
   })
 
+  const thisWindow = win
+
   win.setAlwaysOnTop(true, 'floating')
 
   win.once('ready-to-show', () => {
     if (!win) return
+    if (pendingWindowBounds) {
+      win.setBounds(pendingWindowBounds, false)
+      pendingWindowBounds = null
+    }
     win.showInactive()
     if (process.env.EH_PET_DEBUG) {
       console.log('[pet] window:', win.getBounds())
@@ -219,7 +237,8 @@ function createWindow() {
 
   win.on('closed', () => {
     endWindowDrag()
-    win = null
+    // 重建窗口时，旧窗口的 closed 可能晚于新窗口创建，不能把新窗口清掉。
+    if (win === thisWindow) win = null
   })
 
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -256,6 +275,7 @@ function startPresenceWatch() {
     lastIdleSeconds = 0
   }
   lastPresenceCheckAt = Date.now()
+  if (process.env.EH_PET_DEBUG) console.log('[pet] presence watch started')
 
   presenceWatchTimer = setInterval(() => {
     if (!win || win.isDestroyed()) return
@@ -278,16 +298,77 @@ function startPresenceWatch() {
     const timerWasSuspended =
       timerGap >= IDLE_TIMER_GAP_MS &&
       idleSeconds <= IDLE_ACTIVE_THRESHOLD_S
+    // 空闲达到阈值时也试一次，覆盖“显示器睡了但系统没休眠”的情况。
+    const justWentIdle =
+      lastIdleSeconds < IDLE_RETURN_THRESHOLD_S &&
+      idleSeconds >= IDLE_RETURN_THRESHOLD_S
 
-    if (returnedFromIdle || timerWasSuspended) {
+    if (returnedFromIdle || timerWasSuspended || justWentIdle) {
       if (process.env.EH_PET_DEBUG) {
         console.log('[pet] idle return:', { lastIdleSeconds, idleSeconds, timerGap })
       }
+      // 先让它恢复一次；如果 Elio 空闲，再重建桌宠窗口，彻底重置窗口的桌面状态。
       restoreWindowPresence()
+      // 进入空闲/从睡眠恢复时重建；单纯“回到电脑前”只恢复，避免一次空闲重启两次。
+      if (justWentIdle || timerWasSuspended) void restartPetWindowIfIdle()
     }
 
     lastIdleSeconds = idleSeconds
   }, IDLE_POLL_MS)
+}
+
+/**
+ * 只重建桌宠窗口，不重启后端。
+ * 先问 /status，确认她没在思考/说话，避免打断正在进行的对话。
+ */
+function restartPetWindowIfIdle() {
+  if (presenceResetInFlight) return
+  if (!win || win.isDestroyed() || windowHiddenByUser) return
+  if (Date.now() - lastWindowResetAt < WINDOW_RESET_COOLDOWN_MS) return
+
+  presenceResetInFlight = true
+  void (async () => {
+    try {
+      const response = await fetch(`${STAGE_ORIGIN}/status`, {
+        signal: AbortSignal.timeout(1_500),
+      })
+      if (!response.ok) return
+      const status = await response.json()
+      const alarmSafe =
+        status.nextAlarmInMs === null ||
+        status.nextAlarmInMs > ALARM_SAFE_MS
+
+      if (!status.sleeping || !alarmSafe) {
+        if (process.env.EH_PET_DEBUG) {
+          console.log('[pet] idle return: skip window reset', {
+            sleeping: status.sleeping,
+            nextAlarmInMs: status.nextAlarmInMs,
+          })
+        }
+        return
+      }
+
+      if (process.env.EH_PET_DEBUG) console.log('[pet] idle return: recreating pet window')
+      if (recreatePetWindow()) lastWindowResetAt = Date.now()
+    } catch (error) {
+      if (process.env.EH_PET_DEBUG) {
+        console.log('[pet] idle return: status check failed:', error.message)
+      }
+    } finally {
+      presenceResetInFlight = false
+    }
+  })()
+}
+
+function recreatePetWindow() {
+  if (!win || win.isDestroyed() || windowHiddenByUser) return false
+
+  pendingWindowBounds = win.getBounds()
+  const oldWindow = win
+  win = null
+  oldWindow.destroy()
+  createWindow()
+  return true
 }
 
 function restoreWindowPresence() {

@@ -319,6 +319,37 @@ export function startServer(config: Config): ServerHandle {
       return
     }
 
+    // 当前运行状态：给桌宠判断“现在能不能安全重启窗口”
+    if (req.method === 'GET' && path === '/status') {
+      const speech = speechSnapshot()
+      const nextAlarm = readAlarms(config.dataDir)[0]
+      const nextAlarmAt = nextAlarm ? new Date(nextAlarm.at).getTime() : null
+      const nextAlarmInMs = nextAlarmAt === null ? null : nextAlarmAt - Date.now()
+      const sleeping =
+        state === 'idle' &&
+        !busy &&
+        queue.length === 0 &&
+        !speech.current &&
+        speech.pending.length === 0
+
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+      })
+      res.end(JSON.stringify({
+        state,
+        busy,
+        sleeping,
+        queued: queue.length,
+        speech,
+        nextAlarm: nextAlarm
+          ? { id: nextAlarm.id, at: nextAlarm.at, text: nextAlarm.text }
+          : null,
+        nextAlarmInMs,
+      }))
+      return
+    }
+
     // 全部历史
     if (req.method === 'GET' && path === '/history') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
