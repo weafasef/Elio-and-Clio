@@ -97,6 +97,31 @@
   }
   .dialogue.speaking { border-color: rgba(122, 162, 247, .38); }
 
+  .voice-hud {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    z-index: 6;
+    transform: translateX(-50%);
+    max-width: min(520px, 92vw);
+    padding: 7px 14px;
+    border: 1px solid rgba(122, 162, 247, .35);
+    border-radius: 999px;
+    background: rgba(14, 15, 20, .9);
+    color: #dfe6ff;
+    font-size: 13px;
+    line-height: 1.5;
+    text-align: center;
+    white-space: pre-wrap;
+    pointer-events: none;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .35);
+  }
+  .voice-hud[hidden] { display: none; }
+  .voice-hud.error {
+    border-color: rgba(247, 118, 142, .45);
+    color: #ffd7de;
+  }
+
   .pet-controls {
     display: flex;
     align-items: center;
@@ -332,6 +357,7 @@
     <a href="/" target="_self">记录 ↗</a>
   </div>
 </header>
+<div id="voice-hud" class="voice-hud" hidden aria-live="polite"></div>
 
 <main class="stage">
   <img class="portrait" src="/assets/elio.png" alt="Elio">
@@ -350,13 +376,15 @@
       </div>
     </div>
     <form class="composer" id="composer" data-pet-interactive>
-      <textarea id="input" rows="1" aria-label="输入消息"></textarea>
+      <textarea id="input" rows="1" aria-label="输入消息" aria-keyshortcuts="Control+Meta" title="按住 Control + Command 说话，松开发送"></textarea>
       <button type="submit">发送</button>
     </form>
   </div>
 </main>
 
 <script type="module">
+import { createVoiceInput } from '/voice.js'
+
 const statusEl = document.getElementById('status')
 const lineEl = document.getElementById('line')
 const dialogueEl = document.getElementById('dialogue')
@@ -368,6 +396,7 @@ const composerEl = document.getElementById('composer')
 const portraitEl = document.querySelector('.portrait')
 const petSizeEl = document.getElementById('pet-size')
 const petSizeValueEl = document.getElementById('pet-size-value')
+const voiceHudEl = document.getElementById('voice-hud')
 
 const petMode = document.documentElement.classList.contains('pet')
 const petBridge = window.ehPet
@@ -399,6 +428,10 @@ let currentId = null
 let draggingVolume = false
 let composing = false
 let compositionEndedAt = 0
+let controlDown = false
+let metaDown = false
+let voiceRecording = false
+let voiceHudTimer = 0
 
 function setStatus(text) {
   statusEl.textContent = text
@@ -656,6 +689,58 @@ async function sendMessage() {
   }
 }
 
+function showVoiceHud(text, { error = false, autoHide = 0 } = {}) {
+  if (voiceHudTimer) clearTimeout(voiceHudTimer)
+  voiceHudTimer = 0
+  voiceHudEl.textContent = text
+  voiceHudEl.classList.toggle('error', error)
+  voiceHudEl.hidden = false
+  if (autoHide > 0) {
+    voiceHudTimer = setTimeout(() => {
+      voiceHudEl.hidden = true
+      voiceHudTimer = 0
+    }, autoHide)
+  }
+}
+
+function hideVoiceHud() {
+  if (voiceHudTimer) clearTimeout(voiceHudTimer)
+  voiceHudTimer = 0
+  voiceHudEl.hidden = true
+}
+
+async function sendVoiceText(text) {
+  showVoiceHud('发送中…')
+  const res = await fetch('/say', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  if (!res.ok) {
+    const info = await res.json().catch(() => ({}))
+    throw new Error(info.error || '发送失败')
+  }
+  const chars = [...text]
+  const preview = chars.length > 60 ? chars.slice(0, 60).join('') + '…' : text
+  showVoiceHud(`已发送：${preview}`, { autoHide: 1800 })
+}
+
+const voice = createVoiceInput({
+  onState(state, text) {
+    voiceRecording = state === 'recording'
+    if (text) showVoiceHud(text, { autoHide: state === 'idle' ? 1800 : 0 })
+    else if (state === 'idle') hideVoiceHud()
+    if (petMode && petBridge) {
+      if (state === 'recording') setPetIgnore(false)
+      else if (state === 'idle') updatePetIgnoreAt(lastPointerX, lastPointerY)
+    }
+  },
+  onResult: sendVoiceText,
+  onError(error) {
+    showVoiceHud(`语音失败：${error}`, { error: true, autoHide: 4000 })
+  },
+})
+
 inputEl.addEventListener('input', resizeInput)
 inputEl.addEventListener('compositionstart', () => { composing = true })
 inputEl.addEventListener('compositionend', () => {
@@ -672,6 +757,36 @@ inputEl.addEventListener('keydown', event => {
 composerEl.addEventListener('submit', event => {
   event.preventDefault()
   void sendMessage()
+})
+
+// 按住 Control + Command 说话，松开任意一个键就停止并发送。
+document.addEventListener('keydown', event => {
+  const wasBoth = controlDown && metaDown
+  if (event.key === 'Control') controlDown = true
+  else if (event.key === 'Meta') metaDown = true
+  else if (event.key === 'Escape' && (voice.recording || voice.busy)) {
+    event.preventDefault()
+    voice.cancel()
+    return
+  }
+
+  if (!wasBoth && controlDown && metaDown && !event.repeat && !voice.recording && !voice.busy) {
+    event.preventDefault()
+    void voice.start()
+  }
+})
+
+document.addEventListener('keyup', event => {
+  if (event.key !== 'Control' && event.key !== 'Meta') return
+  if (event.key === 'Control') controlDown = false
+  else metaDown = false
+  if (voice.recording || voice.busy) voice.stop()
+})
+
+window.addEventListener('blur', () => {
+  controlDown = false
+  metaDown = false
+  if (voice.recording) voice.cancel()
 })
 
 function isPetInteractiveAt(clientX, clientY) {
@@ -825,7 +940,7 @@ if (petMode && petBridge) {
   }
 
   document.addEventListener('mousemove', event => {
-    if (petPointerDown || draggingWindow) return
+    if (petPointerDown || draggingWindow || voiceRecording) return
     setPetIgnore(!isPetInteractiveAt(event.clientX, event.clientY))
   }, { passive: true })
 
@@ -845,7 +960,7 @@ if (petMode && petBridge) {
     const wasDragging = draggingWindow
     petPointerDown = false
     if (wasDragging) endPetDrag()
-    else updatePetIgnoreAt(lastPointerX, lastPointerY)
+    else if (!voiceRecording) updatePetIgnoreAt(lastPointerX, lastPointerY)
   }, true)
 
   document.addEventListener('pointercancel', () => {
@@ -875,7 +990,7 @@ if (petMode && petBridge) {
   })
 
   document.addEventListener('mouseleave', () => {
-    if (!petPointerDown && !draggingWindow) setPetIgnore(true)
+    if (!petPointerDown && !draggingWindow && !voiceRecording) setPetIgnore(true)
   })
 }
 

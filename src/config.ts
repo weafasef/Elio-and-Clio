@@ -13,6 +13,22 @@ export type TtsConfig = {
   proxyUrl?: string
 }
 
+/** 本地语音识别（Qwen3-ASR / MLX） */
+export type AsrConfig = {
+  /** 独立 venv 里的 Python */
+  python: string
+  /** MLX 模型名或本地路径 */
+  model: string
+  /** Qwen3-ASR 用的语言名，例如 Chinese；auto 表示自动识别 */
+  language: string
+  /** 专有名词热词 */
+  hotwords: string[]
+  /** 空闲多久后释放 ASR 模型进程（毫秒） */
+  idleUnloadMs: number
+  /** 单次上传最多多少字节 */
+  maxAudioBytes: number
+}
+
 /** eh 的配置。默认值写在代码里，可以被 ~/.eh/config.json 和环境变量覆盖。 */
 export type Config = {
   /** 模型服务地址（OpenAI 兼容），例如 http://127.0.0.1:8096/v1 */
@@ -37,6 +53,8 @@ export type Config = {
   bookFile?: string
   /** 语音合成；不配就不出声 */
   tts?: TtsConfig
+  /** 本地语音识别 */
+  asr: AsrConfig
   /** 流式传输时，多久收不到数据就掐断（毫秒） */
   idleTimeoutMs: number
   /** 连接类错误最多试几次 */
@@ -53,6 +71,15 @@ const DEFAULTS: Config = {
   memoryBank: 'elio',
   idleTimeoutMs: 60_000,
   maxRetries: 3,
+  asr: {
+    python: join(homedir(), '.venvs', 'qwen3-asr', 'bin', 'python'),
+    model: 'mlx-community/Qwen3-ASR-1.7B-4bit',
+    language: 'Chinese',
+    hotwords: ['Elio', 'Clio', 'EH', 'Hindsight', 'Fish Audio', 'Qwen', 'MLX'],
+    /** 0 = 常驻；改成毫秒数就是空闲后释放 */
+    idleUnloadMs: 0,
+    maxAudioBytes: 20_000_000,
+  },
 }
 
 /**
@@ -71,6 +98,7 @@ export function loadConfig(): Config {
   }
 
   const envPort = process.env.EH_PORT
+  const asr = { ...DEFAULTS.asr, ...(fromFile.asr ?? {}) }
   return {
     ...DEFAULTS,
     ...fromFile,
@@ -81,5 +109,10 @@ export function loadConfig(): Config {
     memoryUrl: process.env.EH_MEMORY_URL ?? fromFile.memoryUrl ?? DEFAULTS.memoryUrl,
     memoryBank: process.env.EH_MEMORY_BANK ?? fromFile.memoryBank ?? DEFAULTS.memoryBank,
     bookFile: process.env.EH_BOOK_FILE ?? fromFile.bookFile,
+    asr: {
+      ...asr,
+      python: process.env.EH_ASR_PYTHON ?? asr.python,
+      model: process.env.EH_ASR_MODEL ?? asr.model,
+    },
   }
 }

@@ -15,6 +15,7 @@ import {
   type MemoryNode,
 } from '../core/memory.ts'
 import { runStep } from '../core/loop.ts'
+import { AsrService } from '../asr/service.ts'
 import { readVolume, writeVolume } from '../core/volume.ts'
 import { speechSnapshot, subscribeSpeech } from '../core/speech.ts'
 import { dueAlarms, nextAlarmText, readAlarms, removeAlarms } from '../tools/alarms.ts'
@@ -23,6 +24,7 @@ import type { Config } from '../config.ts'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const UI_FILE = join(HERE, 'ui.html')
 const STAGE_FILE = join(HERE, 'stage.html')
+const VOICE_FILE = join(HERE, 'voice.js')
 const ELIO_FILE = join(HERE, '..', '..', 'assets', 'Elio.jpg')
 const ELIO_PNG_FILE = join(HERE, '..', '..', 'assets', 'Elio.png')
 
@@ -67,6 +69,7 @@ export function startServer(config: Config): ServerHandle {
   const clients = new Set<ServerResponse>()
   /** 待唤醒的内容。外界消息和闹钟响都进这里，一条一步。 */
   const queue: Array<{ src: '外界消息' | '工具返回', text: string }> = []
+  const asr = new AsrService(config.asr)
   let busy = false
   let state: 'idle' | 'running' = 'idle'
   /** 当前这一步的中止开关（网页上的「停止」） */
@@ -229,6 +232,24 @@ export function startServer(config: Config): ServerHandle {
         'Cache-Control': 'no-store',
       })
       res.end(html)
+      return
+    }
+
+    // 语音输入模块
+    if (req.method === 'GET' && path === '/voice.js') {
+      let js: string
+      try {
+        js = readFileSync(VOICE_FILE, 'utf8')
+      } catch {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+        res.end('找不到 voice.js')
+        return
+      }
+      res.writeHead(200, {
+        'Content-Type': 'text/javascript; charset=utf-8',
+        'Cache-Control': 'no-store',
+      })
+      res.end(js)
       return
     }
 
@@ -452,6 +473,32 @@ export function startServer(config: Config): ServerHandle {
       return
     }
 
+    // 本地语音转写
+    if (req.method === 'POST' && path === '/asr') {
+      try {
+        const audio = await readBodyBuffer(req, config.asr.maxAudioBytes)
+        if (
+          audio.length < 44 ||
+          audio.toString('ascii', 0, 4) !== 'RIFF' ||
+          audio.toString('ascii', 8, 12) !== 'WAVE'
+        ) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ error: '需要 16k 单声道 WAV 音频' }))
+          return
+        }
+
+        const result = await asr.transcribe(audio)
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ ok: true, ...result }))
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        const status = message.includes('请求体太大') ? 413 : 500
+        res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: message }))
+      }
+      return
+    }
+
     // 主人说一句
     if (req.method === 'POST' && path === '/say') {
       const body = await readBody(req)
@@ -486,13 +533,14 @@ export function startServer(config: Config): ServerHandle {
   schedule()
 
   return {
-    close: () => new Promise<void>(resolve => {
+    close: async () => {
       unsubscribeSpeech()
       if (timer) clearTimeout(timer)
       for (const client of clients) client.end()
       clients.clear()
-      server.close(() => resolve())
-    }),
+      await asr.close()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    },
   }
 }
 
@@ -507,4 +555,17 @@ async function readBody(req: IncomingMessage): Promise<string> {
     chunks.push(buffer)
   }
   return Buffer.concat(chunks).toString('utf8')
+}
+
+/** 读二进制请求体（语音上传用） */
+async function readBodyBuffer(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of req) {
+    const buffer = chunk as Buffer
+    size += buffer.length
+    if (size > maxBytes) throw new Error('请求体太大')
+    chunks.push(buffer)
+  }
+  return Buffer.concat(chunks)
 }

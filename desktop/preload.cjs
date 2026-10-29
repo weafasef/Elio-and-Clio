@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('ehPet', {
   setScale(percent) {
     ipcRenderer.send('pet:set-scale', Number(percent))
   },
+  requestMicrophone() {
+    return ipcRenderer.invoke('pet:request-microphone')
+  },
   onUiState(callback) {
     ipcRenderer.on('pet:ui-state', (_event, state) => callback(state))
   },

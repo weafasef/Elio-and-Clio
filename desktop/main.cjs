@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, screen, shell, session, globalShortcut, powerMonitor } = require('electron')
+const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, screen, shell, session, globalShortcut, powerMonitor, systemPreferences } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
@@ -66,8 +66,36 @@ if (!gotLock) {
       app.dock.hide()
     }
 
-    session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
-      callback(false)
+    // 只允许舞台页使用麦克风；其他权限继续全部拒绝。
+    session.defaultSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) => {
+      if (permission !== 'media') return false
+      let origin = ''
+      try {
+        origin = new URL(requestingOrigin).origin
+      } catch {
+        return false
+      }
+      if (origin !== STAGE_ORIGIN) return false
+      const mediaTypes = Array.isArray(details?.mediaTypes) ? details.mediaTypes : []
+      return details?.mediaType !== 'video' && !mediaTypes.includes('video')
+    })
+
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+      if (permission !== 'media') {
+        callback(false)
+        return
+      }
+
+      let origin = ''
+      try {
+        origin = new URL(details?.requestingUrl || webContents.getURL()).origin
+      } catch {
+        callback(false)
+        return
+      }
+
+      const mediaTypes = Array.isArray(details?.mediaTypes) ? details.mediaTypes : []
+      callback(origin === STAGE_ORIGIN && !mediaTypes.includes('video'))
     })
 
     applyShortcuts()
@@ -687,6 +715,15 @@ ipcMain.on('pet:set-scale', (event, percent) => {
 ipcMain.on('pet:retry', event => {
   if (!win || event.sender !== win.webContents) return
   loadStage()
+})
+
+ipcMain.handle('pet:request-microphone', async () => {
+  if (process.platform !== 'darwin') return true
+  try {
+    return await systemPreferences.askForMediaAccess('microphone')
+  } catch {
+    return false
+  }
 })
 
 ipcMain.handle('pet:get-shortcuts', () => ({
