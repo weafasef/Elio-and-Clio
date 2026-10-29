@@ -104,13 +104,13 @@
 
   .row {
     display: grid;
-    grid-template-columns: 128px 68px 1fr;
+    grid-template-columns: 128px 104px 1fr;
     gap: 8px;
     padding: 2px 12px;
     align-items: start;
   }
   .time { color: var(--dim); font-variant-numeric: tabular-nums; font-size: 12px; padding-top: 2px; }
-  .src { font-size: 12px; }
+  .src { font-size: 12px; white-space: nowrap; }
   .src.外界消息 { color: #9ece6a; }
   .src.内心活动 { color: #bb9af7; }
   .src.工具调用 { color: #e0af68; }
@@ -312,10 +312,15 @@ function el(tag, className) {
   return node
 }
 
+function sourceLabel(entry) {
+  if (entry.src !== '外界消息') return entry.src
+  return `外界消息【${entry.input === 'voice' ? '语音' : '文字'}】`
+}
+
 function row(entry) {
   const div = el('div', 'row')
   const time = el('div', 'time'); time.textContent = entry.t
-  const src = el('div', 'src ' + entry.src); src.textContent = entry.src
+  const src = el('div', 'src ' + entry.src); src.textContent = sourceLabel(entry)
   const text = el('div', 'text'); text.textContent = entry.text
   div.append(time, src, text)
   return div
@@ -334,7 +339,7 @@ function render(entries) {
     if (thisStep !== stepKey) {
       stepBlock = el('div', 'step')
       const head = el('div', 'step-head')
-      head.textContent = `step ${thisStep} · ${entry.t} · ${entry.src}`
+      head.textContent = `step ${thisStep} · ${entry.t} · ${sourceLabel(entry)}`
       stepBlock.append(head)
       frag.append(stepBlock)
       stepKey = thisStep

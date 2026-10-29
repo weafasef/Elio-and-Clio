@@ -1,7 +1,7 @@
 import { assemble } from './assemble.ts'
 import { formatToolCall } from './format.ts'
 import { appendHistory, readHistory, stamp } from './history.ts'
-import type { EntrySource } from './history.ts'
+import type { EntryInput, EntrySource } from './history.ts'
 import type { WakeSource } from './perception.ts'
 import { saveTrace } from './trace.ts'
 import { recordCall } from './metrics.ts'
@@ -36,7 +36,7 @@ export type StepEvents = {
    * 主人说的话、到点的闹钟都从这里进来 —— 不用等这一步结束。
    * 返回的内容会写进历史，这一轮的请求就带上了。
    */
-  takeQueued?: () => Array<{ src: EntrySource, text: string }>
+  takeQueued?: () => Array<{ src: EntrySource, text: string, input?: EntryInput }>
   /** 本步结束 */
   onDone?: () => void
   /** 外部喊停（网页上的「停止」） */
@@ -74,7 +74,7 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
   const log = (
     src: EntrySource,
     text: string,
-    extra: { step?: number, loop?: number } = {},
+    extra: { step?: number, loop?: number, input?: EntryInput } = {},
   ) => {
     appendHistory(dataDir, src, text, extra)
     events.onHistory?.()
@@ -90,7 +90,11 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
       const queued = events.takeQueued?.() ?? []
       if (queued.length > 0) {
         for (const item of queued) {
-          log(item.src, item.text, { step: stepId, loop })
+          log(item.src, item.text, {
+            step: stepId,
+            loop,
+            ...(item.input ? { input: item.input } : {}),
+          })
         }
         if (queued.some(item => item.src === '外界消息')) {
           wakeSource = '外界消息'

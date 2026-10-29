@@ -5,6 +5,16 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 
+let globalKeyHook = null
+let globalKeyCodes = null
+try {
+  const hook = require('uiohook-napi')
+  globalKeyHook = hook.uIOhook
+  globalKeyCodes = hook.UiohookKey
+} catch (error) {
+  console.error('[pet] uiohook-napi 加载失败：', error.message)
+}
+
 const STAGE_URL = process.env.EH_STAGE_URL || 'http://127.0.0.1:8099/stage?pet=1'
 const STAGE_ORIGIN = new URL(STAGE_URL).origin
 const BASE_WIDTH = 420
@@ -48,6 +58,16 @@ let lastPresenceCheckAt = 0
 let pendingWindowBounds = null
 let presenceResetInFlight = false
 let lastWindowResetAt = 0
+let globalVoiceEnabled = false
+let globalVoicePermissionNeeded = false
+let globalVoiceError = ''
+let globalVoiceHookAttached = false
+let voiceControlDown = false
+let voiceMetaDown = false
+let voiceArming = false
+let voiceActive = false
+let voiceArmTimer = null
+let trayVoiceState = 'idle'
 const IDLE_RETURN_THRESHOLD_S = 60
 const IDLE_ACTIVE_THRESHOLD_S = 10
 const IDLE_POLL_MS = 5_000
@@ -113,6 +133,7 @@ if (!gotLock) {
     applyShortcuts()
     createTray()
     createWindow()
+    startGlobalVoiceHotkey(false)
 
     if (process.platform === 'darwin') {
       const restoreAfterWake = () => {
@@ -152,6 +173,7 @@ app.on('will-quit', () => {
     clearInterval(presenceWatchTimer)
     presenceWatchTimer = null
   }
+  stopGlobalVoiceHotkey()
   globalShortcut.unregisterAll()
   if (tray) {
     tray.destroy()
@@ -258,7 +280,11 @@ function createWindow() {
     if (validatedURL.startsWith(STAGE_ORIGIN + '/')) loadOffline()
   })
 
-  win.webContents.on('did-finish-load', sendUiState)
+  win.webContents.on('did-finish-load', () => {
+    sendUiState()
+    sendVoiceHotkeyMode()
+    setTrayVoiceState('idle')
+  })
 
   loadStage()
 }
@@ -746,6 +772,188 @@ function openShortcutSettings() {
   })
 }
 
+function startGlobalVoiceHotkey(prompt = false) {
+  if (globalVoiceEnabled) return true
+  if (!globalKeyHook || !globalKeyCodes) {
+    globalVoiceError = 'uiohook-napi 不可用'
+    rebuildTrayMenu()
+    return false
+  }
+
+  if (process.platform === 'darwin') {
+    if (process.env.EH_PET_DEBUG) console.log('[pet] global voice: checking accessibility')
+    let trusted = false
+    try {
+      trusted = systemPreferences.isTrustedAccessibilityClient(Boolean(prompt))
+    } catch {
+      trusted = false
+    }
+    if (!trusted) {
+      globalVoicePermissionNeeded = true
+      globalVoiceError = '需要辅助功能权限'
+      rebuildTrayMenu()
+      return false
+    }
+  }
+
+  try {
+    if (process.env.EH_PET_DEBUG) console.log('[pet] global voice: starting hook')
+    if (!globalVoiceHookAttached) {
+      globalKeyHook.on('keydown', handleGlobalVoiceKeyDown)
+      globalKeyHook.on('keyup', handleGlobalVoiceKeyUp)
+      globalVoiceHookAttached = true
+    }
+    globalKeyHook.start()
+    globalVoiceEnabled = true
+    globalVoicePermissionNeeded = false
+    globalVoiceError = ''
+    if (process.env.EH_PET_DEBUG) console.log('[pet] global voice hotkey enabled')
+    sendVoiceHotkeyMode()
+    rebuildTrayMenu()
+    return true
+  } catch (error) {
+    globalVoiceError = error instanceof Error ? error.message : String(error)
+    if (process.env.EH_PET_DEBUG) console.log('[pet] global voice hotkey failed:', globalVoiceError)
+    rebuildTrayMenu()
+    return false
+  }
+}
+
+function stopGlobalVoiceHotkey() {
+  if (globalKeyHook && globalVoiceEnabled) {
+    try {
+      globalKeyHook.stop()
+    } catch {
+      // 已经停了
+    }
+  }
+  globalVoiceEnabled = false
+  cancelVoiceArm()
+  voiceControlDown = false
+  voiceMetaDown = false
+  voiceActive = false
+  sendVoiceHotkeyMode()
+}
+
+function requestGlobalVoiceHotkey() {
+  const ok = startGlobalVoiceHotkey(true)
+  if (!ok && process.platform === 'darwin' && globalVoicePermissionNeeded) {
+    shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
+  }
+  rebuildTrayMenu()
+}
+
+function isGlobalControlKey(code) {
+  return code === globalKeyCodes?.Ctrl || code === globalKeyCodes?.CtrlRight
+}
+
+function isGlobalMetaKey(code) {
+  return code === globalKeyCodes?.Meta || code === globalKeyCodes?.MetaRight
+}
+
+function handleGlobalVoiceKeyDown(event) {
+  if (!globalVoiceEnabled) return
+  const code = event.keycode
+
+  if (isGlobalControlKey(code)) {
+    voiceControlDown = true
+    if (process.env.EH_PET_DEBUG) console.log('[pet] global keydown: control')
+  } else if (isGlobalMetaKey(code)) {
+    voiceMetaDown = true
+    if (process.env.EH_PET_DEBUG) console.log('[pet] global keydown: meta')
+  } else {
+    // 180ms 保护期内按下其他键，说明这不是“按住 Control + Command 说话”。
+    if (voiceArming) {
+      if (process.env.EH_PET_DEBUG) console.log('[pet] global voice: canceled by other key')
+      cancelVoiceArm()
+    }
+    return
+  }
+
+  if (!voiceArming && !voiceActive && voiceControlDown && voiceMetaDown) {
+    armGlobalVoice()
+  }
+}
+
+function handleGlobalVoiceKeyUp(event) {
+  if (!globalVoiceEnabled) return
+  const code = event.keycode
+
+  if (isGlobalControlKey(code)) {
+    voiceControlDown = false
+    if (process.env.EH_PET_DEBUG) console.log('[pet] global keyup: control')
+  } else if (isGlobalMetaKey(code)) {
+    voiceMetaDown = false
+    if (process.env.EH_PET_DEBUG) console.log('[pet] global keyup: meta')
+  } else {
+    return
+  }
+
+  if (voiceArming) {
+    cancelVoiceArm()
+    return
+  }
+
+  if (voiceActive) stopGlobalVoiceRecording()
+}
+
+function armGlobalVoice() {
+  if (voiceArming || voiceActive) return
+  voiceArming = true
+  voiceArmTimer = setTimeout(() => {
+    voiceArmTimer = null
+    if (!voiceArming) return
+    voiceArming = false
+    if (!voiceControlDown || !voiceMetaDown) return
+
+    voiceActive = true
+    setTrayVoiceState('recording')
+    if (process.env.EH_PET_DEBUG) console.log('[pet] global voice start')
+    sendVoiceStart()
+  }, 180)
+}
+
+function cancelVoiceArm() {
+  voiceArming = false
+  if (voiceArmTimer) {
+    clearTimeout(voiceArmTimer)
+    voiceArmTimer = null
+  }
+}
+
+function stopGlobalVoiceRecording() {
+  if (!voiceActive) return
+  voiceActive = false
+  setTrayVoiceState('processing')
+  if (process.env.EH_PET_DEBUG) console.log('[pet] global voice stop')
+  sendVoiceStop()
+}
+
+function sendVoiceStart() {
+  if (!win || win.isDestroyed()) return
+  win.webContents.send('pet:voice-start')
+}
+
+function sendVoiceStop() {
+  if (!win || win.isDestroyed()) return
+  win.webContents.send('pet:voice-stop')
+}
+
+function sendVoiceHotkeyMode() {
+  if (!win || win.isDestroyed()) return
+  win.webContents.send('pet:voice-hotkey-mode', { enabled: globalVoiceEnabled })
+}
+
+function setTrayVoiceState(state) {
+  trayVoiceState = state
+  if (!tray || process.platform !== 'darwin') return
+  try {
+    tray.setTitle(state === 'recording' ? '🎙' : state === 'processing' ? '…' : '')
+  } catch {
+    // 托盘标题不可用不影响录音
+  }
+}
+
 function createTray() {
   let icon = nativeImage.createEmpty()
   if (fs.existsSync(TRAY_ICON)) {
@@ -802,6 +1010,16 @@ function rebuildTrayMenu() {
       },
     },
     {
+      label: globalVoiceEnabled
+        ? '全局语音快捷键：已启用'
+        : globalVoicePermissionNeeded
+          ? '启用全局语音快捷键（需要辅助功能权限）…'
+          : '启用全局语音快捷键…',
+      enabled: !globalVoiceEnabled,
+      click: requestGlobalVoiceHotkey,
+    },
+    { type: 'separator' },
+    {
       label: '设置快捷键…',
       click: openShortcutSettings,
     },
@@ -849,6 +1067,12 @@ ipcMain.on('pet:drag-end', event => {
 ipcMain.on('pet:set-scale', (event, percent) => {
   if (!win || event.sender !== win.webContents) return
   setWindowScale(percent)
+})
+
+ipcMain.on('pet:voice-state', (event, state) => {
+  if (!win || event.sender !== win.webContents) return
+  if (state !== 'idle' && state !== 'recording' && state !== 'processing') return
+  setTrayVoiceState(state)
 })
 
 ipcMain.on('pet:retry', event => {

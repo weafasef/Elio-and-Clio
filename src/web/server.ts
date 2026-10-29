@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { appendHistory, deleteHistoryLoop, nextStep, readHistory, renderEntries } from '../core/history.ts'
+import type { EntryInput } from '../core/history.ts'
 import { findTrace } from '../core/trace.ts'
 import {
   buildTree,
@@ -68,7 +69,7 @@ export type ServerHandle = {
 export function startServer(config: Config): ServerHandle {
   const clients = new Set<ServerResponse>()
   /** 待唤醒的内容。外界消息和闹钟响都进这里，一条一步。 */
-  const queue: Array<{ src: '外界消息' | '工具返回', text: string }> = []
+  const queue: Array<{ src: '外界消息' | '工具返回', text: string, input?: EntryInput }> = []
   const asr = new AsrService(config.asr)
   let busy = false
   let state: 'idle' | 'running' = 'idle'
@@ -148,7 +149,10 @@ export function startServer(config: Config): ServerHandle {
         // 一批里只要有人说话，就算「外界消息」把她叫醒的
         const wakeSource = batch.some(item => item.src === '外界消息') ? '外界消息' : '工具返回'
         for (const item of batch) {
-          appendHistory(config.dataDir, item.src, item.text, { step: stepId })
+          appendHistory(config.dataDir, item.src, item.text, {
+            step: stepId,
+            ...(item.input ? { input: item.input } : {}),
+          })
         }
         broadcast({ type: 'history' })
 
@@ -534,9 +538,11 @@ export function startServer(config: Config): ServerHandle {
     if (req.method === 'POST' && path === '/say') {
       const body = await readBody(req)
       let text = ''
+      let input: EntryInput = 'text'
       try {
-        const parsed = JSON.parse(body) as { text?: unknown }
+        const parsed = JSON.parse(body) as { text?: unknown, input?: unknown }
         if (typeof parsed.text === 'string') text = parsed.text.trim()
+        if (parsed.input === 'voice') input = 'voice'
       } catch {
         // 下面统一报错
       }
@@ -546,7 +552,7 @@ export function startServer(config: Config): ServerHandle {
         return
       }
 
-      queue.push({ src: '外界消息', text })
+      queue.push({ src: '外界消息', text, input })
       void kick()
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })

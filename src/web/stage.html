@@ -430,6 +430,7 @@ let composing = false
 let compositionEndedAt = 0
 let controlDown = false
 let metaDown = false
+let globalVoiceHotkey = false
 let voiceRecording = false
 let voiceHudTimer = 0
 
@@ -714,7 +715,7 @@ async function sendVoiceText(text) {
   const res = await fetch('/say', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, input: 'voice' }),
   })
   if (!res.ok) {
     const info = await res.json().catch(() => ({}))
@@ -728,6 +729,12 @@ async function sendVoiceText(text) {
 const voice = createVoiceInput({
   onState(state, text) {
     voiceRecording = state === 'recording'
+    const trayState = state === 'recording'
+      ? 'recording'
+      : state === 'starting' || state === 'transcribing'
+        ? 'processing'
+        : 'idle'
+    petBridge?.reportVoiceState?.(trayState)
     if (text) showVoiceHud(text, { autoHide: state === 'idle' ? 1800 : 0 })
     else if (state === 'idle') hideVoiceHud()
     if (petMode && petBridge) {
@@ -739,6 +746,17 @@ const voice = createVoiceInput({
   onError(error) {
     showVoiceHud(`语音失败：${error}`, { error: true, autoHide: 4000 })
   },
+})
+
+petBridge?.onVoiceHotkeyMode?.(state => {
+  globalVoiceHotkey = Boolean(state?.enabled)
+  document.documentElement.dataset.globalVoice = globalVoiceHotkey ? '1' : '0'
+})
+petBridge?.onVoiceStart?.(() => {
+  if (globalVoiceHotkey) void voice.start()
+})
+petBridge?.onVoiceStop?.(() => {
+  if (globalVoiceHotkey) voice.stop()
 })
 
 inputEl.addEventListener('input', resizeInput)
@@ -770,7 +788,15 @@ document.addEventListener('keydown', event => {
     return
   }
 
-  if (!wasBoth && controlDown && metaDown && !event.repeat && !voice.recording && !voice.busy) {
+  if (
+    !globalVoiceHotkey &&
+    !wasBoth &&
+    controlDown &&
+    metaDown &&
+    !event.repeat &&
+    !voice.recording &&
+    !voice.busy
+  ) {
     event.preventDefault()
     void voice.start()
   }
@@ -780,7 +806,7 @@ document.addEventListener('keyup', event => {
   if (event.key !== 'Control' && event.key !== 'Meta') return
   if (event.key === 'Control') controlDown = false
   else metaDown = false
-  if (voice.recording || voice.busy) voice.stop()
+  if (!globalVoiceHotkey && (voice.recording || voice.busy)) voice.stop()
 })
 
 window.addEventListener('blur', () => {

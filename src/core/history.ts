@@ -4,10 +4,15 @@ import { dirname, join } from 'node:path'
 /** 会话历史里一条记录的来源 */
 export type EntrySource = '外界消息' | '工具调用' | '工具返回' | '内心活动' | '自由活动'
 
+/** 外界消息是怎么进来的；旧记录没有这个字段，按文字处理 */
+export type EntryInput = 'text' | 'voice'
+
 export type Entry = {
   /** 时间戳：2026/10/20/01/15 */
   t: string
   src: EntrySource
+  /** 仅对外界消息有意义 */
+  input?: EntryInput
   text: string
   /** 压缩出来的行：这段历史的结束时间（没有就是单个时间点） */
   tEnd?: string
@@ -37,7 +42,7 @@ export function appendHistory(
   dataDir: string,
   src: EntrySource,
   text: string,
-  extra: { step?: number, loop?: number } = {},
+  extra: { step?: number, loop?: number, input?: EntryInput } = {},
 ): Entry {
   const entry: Entry = { t: stamp(), src, text, ...extra }
   const file = historyFile(dataDir)
@@ -102,12 +107,18 @@ export function renderHistory(dataDir: string): string {
   return renderEntries(readHistory(dataDir))
 }
 
+/** 来源展示：外界消息附上「文字 / 语音」标签 */
+export function sourceLabel(src: EntrySource, input?: EntryInput): string {
+  if (src !== '外界消息') return src
+  return `外界消息【${input === 'voice' ? '语音' : '文字'}】`
+}
+
 /** 把一组记录渲染成文本（回看 trace 时按条数截取用） */
 export function renderEntries(entries: Entry[]): string {
   return entries
     .map(entry => {
       const when = entry.tEnd && entry.tEnd !== entry.t ? `${entry.t} - ${entry.tEnd}` : entry.t
-      return `${when}  ${entry.src}  ${entry.text}`
+      return `${when}  ${sourceLabel(entry.src, entry.input)}  ${entry.text}`
     })
     .join('\n')
 }

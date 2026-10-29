@@ -18,6 +18,18 @@ contextBridge.exposeInMainWorld('ehPet', {
   requestMicrophone() {
     return ipcRenderer.invoke('pet:request-microphone')
   },
+  onVoiceStart(callback) {
+    ipcRenderer.on('pet:voice-start', () => callback())
+  },
+  onVoiceStop(callback) {
+    ipcRenderer.on('pet:voice-stop', () => callback())
+  },
+  onVoiceHotkeyMode(callback) {
+    ipcRenderer.on('pet:voice-hotkey-mode', (_event, state) => callback(state))
+  },
+  reportVoiceState(state) {
+    ipcRenderer.send('pet:voice-state', state)
+  },
   onUiState(callback) {
     ipcRenderer.on('pet:ui-state', (_event, state) => callback(state))
   },
