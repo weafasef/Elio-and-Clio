@@ -42,6 +42,13 @@ let dragTimer = null
 let dragSafety = null
 let registeredShortcuts = {}
 let shortcutErrors = []
+let presenceWatchTimer = null
+let lastIdleSeconds = 0
+let lastPresenceCheckAt = 0
+const IDLE_RETURN_THRESHOLD_S = 60
+const IDLE_ACTIVE_THRESHOLD_S = 10
+const IDLE_POLL_MS = 5_000
+const IDLE_TIMER_GAP_MS = 15_000
 let settings = {
   showTextAndControls: true,
   showComposer: true,
@@ -110,6 +117,7 @@ if (!gotLock) {
       }
       powerMonitor.on('resume', restoreAfterWake)
       powerMonitor.on('unlock-screen', restoreAfterWake)
+      startPresenceWatch()
     }
 
     app.on('activate', () => {
@@ -128,6 +136,10 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
+  if (presenceWatchTimer) {
+    clearInterval(presenceWatchTimer)
+    presenceWatchTimer = null
+  }
   globalShortcut.unregisterAll()
   if (tray) {
     tray.destroy()
@@ -230,6 +242,52 @@ function createWindow() {
   win.webContents.on('did-finish-load', sendUiState)
 
   loadStage()
+}
+
+/**
+ * 显示器单独睡眠时，macOS 不一定发 resume / unlock-screen。
+ * 用系统空闲时间从长时间闲置突然归零，判断“主人刚回来”，再补一次跨桌面状态。
+ */
+function startPresenceWatch() {
+  if (presenceWatchTimer) return
+  try {
+    lastIdleSeconds = powerMonitor.getSystemIdleTime()
+  } catch {
+    lastIdleSeconds = 0
+  }
+  lastPresenceCheckAt = Date.now()
+
+  presenceWatchTimer = setInterval(() => {
+    if (!win || win.isDestroyed()) return
+
+    let idleSeconds
+    try {
+      idleSeconds = powerMonitor.getSystemIdleTime()
+    } catch {
+      return
+    }
+
+    const now = Date.now()
+    const timerGap = now - lastPresenceCheckAt
+    lastPresenceCheckAt = now
+
+    const returnedFromIdle =
+      lastIdleSeconds >= IDLE_RETURN_THRESHOLD_S &&
+      idleSeconds <= IDLE_ACTIVE_THRESHOLD_S
+    // 显示器睡眠时主进程的定时器可能被压制，醒来后第一次检查的间隔会明显变大。
+    const timerWasSuspended =
+      timerGap >= IDLE_TIMER_GAP_MS &&
+      idleSeconds <= IDLE_ACTIVE_THRESHOLD_S
+
+    if (returnedFromIdle || timerWasSuspended) {
+      if (process.env.EH_PET_DEBUG) {
+        console.log('[pet] idle return:', { lastIdleSeconds, idleSeconds, timerGap })
+      }
+      restoreWindowPresence()
+    }
+
+    lastIdleSeconds = idleSeconds
+  }, IDLE_POLL_MS)
 }
 
 function restoreWindowPresence() {
