@@ -177,15 +177,21 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
         tools: (request.tools ?? []).map(tool => tool.name),
         response: {
           text: result.text,
+          reasoning: result.reasoning,
           toolCalls: result.toolCalls.map(call => ({ id: call.id, name: call.name, args: call.args })),
           finishReason: result.finishReason,
           usage: result.usage,
         },
       })
 
-      // 文字 → 内心活动
-      if (result.text) {
-        log('内心活动', result.text, { step: stepId, loop })
+      // 思维链和最终文字都算内心活动；完全相同就只记一次
+      const reasoning = result.reasoning.trim()
+      const text = result.text.trim()
+      if (reasoning) {
+        log('内心活动', reasoning, { step: stepId, loop })
+      }
+      if (text && text !== reasoning) {
+        log('内心活动', text, { step: stepId, loop })
       }
 
       // 没调任何工具 → 继续下一轮（只有 sleep 能结束）

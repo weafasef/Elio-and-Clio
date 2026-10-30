@@ -56,6 +56,8 @@ export type StreamCallbacks = {
 
 export type StreamResult = {
   text: string
+  /** 服务端暴露的思维链 / reasoning 内容；没有就是空字符串 */
+  reasoning: string
   toolCalls: ToolCall[]
   finishReason: string
   usage?: Usage
@@ -234,6 +236,7 @@ async function parseStream(
 
   let buffer = ''
   let text = ''
+  let reasoning = ''
   let finishReason = ''
   let firstTokenAt: number | null = null
   let usage: Usage | undefined
@@ -296,6 +299,12 @@ async function parseStream(
       if (!choice) continue
 
       const delta = choice.delta
+      const reasoningPiece =
+        readReasoning(delta?.reasoning_content) ||
+        readReasoning(delta?.reasoning) ||
+        readReasoning(delta?.reasoning_details)
+      if (reasoningPiece) reasoning += reasoningPiece
+
       if (delta?.content) {
         if (firstTokenAt === null) firstTokenAt = Date.now()
         text += delta.content
@@ -321,6 +330,7 @@ async function parseStream(
 
   return {
     text,
+    reasoning,
     toolCalls: finalizeToolCalls(calls),
     finishReason,
     usage,
@@ -356,6 +366,20 @@ function finalizeToolCalls(
     })
 }
 
+/** 把不同服务端的 reasoning 字段统一成字符串 */
+function readReasoning(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value.map(readReasoning).join('')
+  if (!value || typeof value !== 'object') return ''
+
+  const record = value as Record<string, unknown>
+  for (const key of ['text', 'content', 'summary']) {
+    const text = readReasoning(record[key])
+    if (text) return text
+  }
+  return ''
+}
+
 // ─────────────────────────────── 非流式兜底 ───────────────────────────────
 
 function parseWholeBody(json: any, startedAt: number): OnceResult {
@@ -373,6 +397,10 @@ function parseWholeBody(json: any, startedAt: number): OnceResult {
 
   return {
     text: message.content ?? '',
+    reasoning:
+      readReasoning(message.reasoning_content) ||
+      readReasoning(message.reasoning) ||
+      readReasoning(message.reasoning_details),
     toolCalls: finalizeToolCalls(calls),
     finishReason: choice?.finish_reason ?? '',
     usage: json.usage

@@ -321,7 +321,8 @@ function row(entry) {
   const div = el('div', 'row')
   const time = el('div', 'time'); time.textContent = entry.t
   const src = el('div', 'src ' + entry.src); src.textContent = sourceLabel(entry)
-  const text = el('div', 'text'); text.textContent = entry.text
+  const text = el('div', 'text')
+  text.textContent = entry.src === '内心活动' ? compactNewlines(entry.text) : entry.text
   div.append(time, src, text)
   return div
 }
@@ -447,6 +448,7 @@ async function openTrace(step, loop) {
   })
   drawerBody.append(section('请求 · tools', tools.join('\n') || '（无）'))
   drawerBody.append(section('响应 · 文字', response.text || '（无）'))
+  drawerBody.append(section('响应 · 思维链', compactNewlines(response.reasoning) || '（无）'))
   drawerBody.append(section('响应 · 工具调用', response.toolCalls.length
     ? response.toolCalls.map(call => `${call.name}(${JSON.stringify(call.args)})`).join('\n')
     : '（无）'))
@@ -511,6 +513,12 @@ async function openMemory() {
     box.append(head, entries)
     drawerBody.append(box)
   }
+}
+
+function compactNewlines(text) {
+  return String(text ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n{2,}/g, '\n')
 }
 
 function section(title, body) {

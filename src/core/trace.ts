@@ -5,6 +5,8 @@ import type { Usage } from '../model.ts'
 /** 那一次的响应 */
 export type TraceResponse = {
   text: string
+  /** 服务端暴露的思维链；旧记录没有这个字段 */
+  reasoning?: string
   toolCalls: Array<{ id: string, name: string, args: unknown }>
   finishReason: string
   usage?: Usage
