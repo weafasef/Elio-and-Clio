@@ -75,7 +75,7 @@ const DEFAULTS: Config = {
     python: join(homedir(), '.venvs', 'qwen3-asr', 'bin', 'python'),
     model: 'mlx-community/Qwen3-ASR-1.7B-4bit',
     language: 'Chinese',
-    hotwords: ['Elio', 'Clio', 'EH', 'Hindsight', 'Fish Audio', 'Qwen', 'MLX'],
+    hotwords: ['Elio', 'Clio', 'EH'],
     /** 0 = 常驻；改成毫秒数就是空闲后释放 */
     idleUnloadMs: 0,
     maxAudioBytes: 20_000_000,
