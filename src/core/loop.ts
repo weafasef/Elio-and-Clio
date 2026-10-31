@@ -86,6 +86,9 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
       loop++
       events.onLoopStart?.(loop)
 
+      // 本轮回复里只允许成功压缩一次；压完行号会变
+      let historyCompressed = false
+
       // 排队进来的东西：主人说的话、到点的闹钟，下一轮就带上
       const queued = events.takeQueued?.() ?? []
       if (queued.length > 0) {
@@ -205,7 +208,12 @@ export async function runStep(config: Config, events: StepEvents): Promise<void>
         if (events.signal?.aborted) break
         events.onToolCall?.(call.name)
         log('工具调用', formatToolCall(call.name, call.args), { step: stepId, loop })
-        const output = await runTool(call.name, call.args, { dataDir })
+        const output = call.name === 'history_compress' && historyCompressed
+          ? '错误：本轮已经成功压缩过一次历史，行号已变化；请下一轮重新查看后再压。'
+          : await runTool(call.name, call.args, { dataDir })
+        if (call.name === 'history_compress' && !output.startsWith('错误：')) {
+          historyCompressed = true
+        }
         log('工具返回', output, { step: stepId, loop })
         if (call.name === 'sleep') shouldStop = true
       }

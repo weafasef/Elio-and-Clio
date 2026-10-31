@@ -96,15 +96,18 @@ export function readHistory(dataDir: string): Entry[] {
 }
 
 /**
- * 渲染成给人看的一大段文本（请求里那条 role=user 的内容）。
+ * 渲染成给模型看的一大段文本（请求里那条 role=user 的内容）。
  *
- *   2026/10/20/01/15  外界消息  主人：在吗
- *   2026/10/20/01/15  内心活动  主人在叫我
+ *   [1]  2026/10/20/01/15  外界消息  主人：在吗
+ *   [2]  2026/10/20/01/15  内心活动  主人在叫我
  *
+ * 行号只用于本轮上下文，压缩后会重新编号；档案里不存行号。
  * 历史为空时返回空字符串（调用方会把这条消息整个省掉）。
  */
 export function renderHistory(dataDir: string): string {
-  return renderEntries(readHistory(dataDir))
+  return readHistory(dataDir)
+    .map((entry, index) => `[${index + 1}]  ${renderEntry(entry)}`)
+    .join('\n')
 }
 
 /** 来源展示：外界消息附上「文字 / 语音」标签 */
@@ -113,14 +116,14 @@ export function sourceLabel(src: EntrySource, input?: EntryInput): string {
   return `外界消息【${input === 'voice' ? '语音' : '文字'}】`
 }
 
+function renderEntry(entry: Entry): string {
+  const when = entry.tEnd && entry.tEnd !== entry.t ? `${entry.t} - ${entry.tEnd}` : entry.t
+  return `${when}  ${sourceLabel(entry.src, entry.input)}  ${entry.text}`
+}
+
 /** 把一组记录渲染成文本（回看 trace 时按条数截取用） */
 export function renderEntries(entries: Entry[]): string {
-  return entries
-    .map(entry => {
-      const when = entry.tEnd && entry.tEnd !== entry.t ? `${entry.t} - ${entry.tEnd}` : entry.t
-      return `${when}  ${sourceLabel(entry.src, entry.input)}  ${entry.text}`
-    })
-    .join('\n')
+  return entries.map(renderEntry).join('\n')
 }
 
 // ─────────────────────────── 压缩与档案 ───────────────────────────
@@ -156,11 +159,48 @@ export function compressHistory(
     throw new Error('这段时间里没有历史记录')
   }
 
-  const first = indexes[0]!
-  const last = indexes[indexes.length - 1]!
-  const picked = entries.slice(first, last + 1)
-  const lastEntry = picked[picked.length - 1]!
+  return compressEntries(dataDir, entries, indexes[0]!, indexes[indexes.length - 1]!, summary)
+}
 
+/**
+ * 按当前渲染行号压缩，行号从 1 开始，闭区间。
+ *
+ * 交给模型自己精确选中某几条工具返回，避免同一分钟里的对话被一起压掉。
+ * 原文仍然完整写进档案。
+ */
+export function compressHistoryByLines(
+  dataDir: string,
+  startLine: number,
+  endLine: number,
+  summary: string,
+): { removed: number, stamp: string, firstIndex: number } {
+  const entries = readHistory(dataDir)
+
+  if (!Number.isInteger(startLine) || !Number.isInteger(endLine)) {
+    throw new Error('行号必须是整数')
+  }
+  if (startLine < 1 || endLine < startLine) {
+    throw new Error('行号范围不对：要满足 1 <= 开始行 <= 结束行')
+  }
+  if (endLine > entries.length) {
+    throw new Error(`结束行 ${endLine} 超过当前历史共 ${entries.length} 行`)
+  }
+
+  return compressEntries(dataDir, entries, startLine - 1, endLine - 1, summary)
+}
+
+/** 把 entries[first..last] 换成一行摘要，原文进当天档案 */
+function compressEntries(
+  dataDir: string,
+  entries: Entry[],
+  first: number,
+  last: number,
+  summary: string,
+): { removed: number, stamp: string, firstIndex: number } {
+  const picked = entries.slice(first, last + 1)
+  if (picked.length === 0) throw new Error('这段时间里没有历史记录')
+
+  const lastEntry = picked[picked.length - 1]!
   const date = picked[0]!.t.slice(0, 10)                 // 2026/10/21
   const range = `${picked[0]!.t} - ${lastEntry.tEnd ?? lastEntry.t}`
   const id = appendArchive(dataDir, date, range, summary, renderEntries(picked))
