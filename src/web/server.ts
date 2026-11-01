@@ -15,6 +15,16 @@ import {
   renderMemoryAt,
   type MemoryNode,
 } from '../core/memory.ts'
+import {
+  buildTree as buildPersonaTree,
+  estimateTokens as estimatePersonaTokens,
+  normalizeLines as normalizePersonaLines,
+  readContent as readPersonaContent,
+  readSkeletonLines as readPersonaSkeletonLines,
+  renderFrom as renderPersonaFrom,
+  serializeContent as serializePersonaContent,
+  type PersonaNode,
+} from '../core/persona.ts'
 import { runStep } from '../core/loop.ts'
 import { AsrService } from '../asr/service.ts'
 import { readVolume, writeVolume } from '../core/volume.ts'
@@ -35,11 +45,15 @@ type MemoryViewRow = {
   depth: number
   visible: boolean
   count: number
-  entries: Array<{ source: string, text: string }>
+  entries: Array<{ source: string | null, text: string }>
 }
 
-/** 把记忆树压成网页好渲染的列表；隐藏段也保留正文，只在界面上标注 */
-function flattenMemory(nodes: MemoryNode[], depth = 0, rows: MemoryViewRow[] = []): MemoryViewRow[] {
+/** 把记忆/人格树压成网页好渲染的列表；隐藏段也保留正文，只在界面上标注 */
+function flattenTree(
+  nodes: Array<MemoryNode | PersonaNode>,
+  depth = 0,
+  rows: MemoryViewRow[] = [],
+): MemoryViewRow[] {
   for (const node of nodes) {
     rows.push({
       path: node.path,
@@ -48,7 +62,7 @@ function flattenMemory(nodes: MemoryNode[], depth = 0, rows: MemoryViewRow[] = [
       count: node.entries.length,
       entries: node.entries.map(entry => ({ source: entry.source, text: entry.text })),
     })
-    flattenMemory(node.children, depth + 1, rows)
+    flattenTree(node.children, depth + 1, rows)
   }
   return rows
 }
@@ -425,7 +439,25 @@ export function startServer(config: Config): ServerHandle {
       res.end(JSON.stringify({
         rev: memory.rev,
         tokens: memory.tokens,
-        sections: flattenMemory(buildTree(lines, content)),
+        sections: flattenTree(buildTree(lines, content)),
+      }))
+      return
+    }
+
+    // 当前人格树：显示/隐藏、条目和 token 统计；隐藏段也返回正文供查看
+    if (req.method === 'GET' && path === '/persona') {
+      const content = readPersonaContent(config.dataDir)
+      const lines = normalizePersonaLines(readPersonaSkeletonLines(config.dataDir), content)
+      const tokens = estimatePersonaTokens(renderPersonaFrom(lines, content))
+      const fileTokens = estimatePersonaTokens(serializePersonaContent(lines, content))
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+      })
+      res.end(JSON.stringify({
+        tokens,
+        fileTokens,
+        sections: flattenTree(buildPersonaTree(lines, content)),
       }))
       return
     }

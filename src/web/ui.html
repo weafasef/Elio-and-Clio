@@ -268,6 +268,7 @@
   <h1>EH</h1>
   <span id="state">连接中…</span>
   <div class="header-actions">
+    <button id="persona-btn" class="header-btn" type="button">人格</button>
     <button id="memory-btn" class="header-btn" type="button">记忆</button>
     <a class="stage-link" href="/stage" target="_blank" rel="noreferrer">舞台 ↗</a>
   </div>
@@ -302,6 +303,7 @@ const drawerTitle = document.getElementById('drawer-title')
 const drawerBody = document.getElementById('drawer-body')
 const drawerClose = document.getElementById('drawer-close')
 const stopBtn = document.getElementById('stop')
+const personaBtn = document.getElementById('persona-btn')
 const memoryBtn = document.getElementById('memory-btn')
 
 let running = false
@@ -455,29 +457,8 @@ async function openTrace(step, loop) {
   drawerBody.append(section('响应 · 其他', `finish: ${response.finishReason}\nusage: ${JSON.stringify(response.usage ?? null)}`))
 }
 
-async function openMemory() {
-  drawerTitle.textContent = '记忆'
-  drawerBody.replaceChildren()
-  drawer.hidden = false
-
-  let data
-  try {
-    const res = await fetch('/memory')
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    data = await res.json()
-  } catch (error) {
-    const pre = el('pre')
-    pre.textContent = `读取记忆失败：${error instanceof Error ? error.message : String(error)}`
-    drawerBody.append(pre)
-    return
-  }
-
-  drawerTitle.textContent = `记忆 · rev ${data.rev} · 约 ${data.tokens} token`
-  const legend = el('div', 'memory-legend')
-  legend.textContent = '显示 = 每轮进入上下文；隐藏 = 只留标题和条数，需要 memory_read。'
-  drawerBody.append(legend)
-
-  for (const section of data.sections) {
+function renderSectionList(sections) {
+  for (const section of sections) {
     const box = el('div', 'memory-section')
     if (!section.visible) box.classList.add('is-hidden')
 
@@ -503,9 +484,12 @@ async function openMemory() {
     } else {
       for (const entry of section.entries) {
         const row = el('div', 'memory-entry')
-        const source = el('span', 'memory-source ' + entry.source)
-        source.textContent = `[${entry.source}]`
-        row.append(source, document.createTextNode(entry.text))
+        if (entry.source) {
+          const source = el('span', 'memory-source ' + entry.source)
+          source.textContent = `[${entry.source}]`
+          row.append(source)
+        }
+        row.append(document.createTextNode(entry.text))
         entries.append(row)
       }
     }
@@ -513,6 +497,54 @@ async function openMemory() {
     box.append(head, entries)
     drawerBody.append(box)
   }
+}
+
+async function openPersona() {
+  drawerTitle.textContent = '人格'
+  drawerBody.replaceChildren()
+  drawer.hidden = false
+
+  let data
+  try {
+    const res = await fetch('/persona')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    data = await res.json()
+  } catch (error) {
+    const pre = el('pre')
+    pre.textContent = `读取人格失败：${error instanceof Error ? error.message : String(error)}`
+    drawerBody.append(pre)
+    return
+  }
+
+  drawerTitle.textContent = `人格 · 约 ${data.tokens} token（全文 ${data.fileTokens} token）`
+  const legend = el('div', 'memory-legend')
+  legend.textContent = '显示 = 每轮进入 system；隐藏 = 只留标题和条数，需要 persona_read。'
+  drawerBody.append(legend)
+  renderSectionList(data.sections)
+}
+
+async function openMemory() {
+  drawerTitle.textContent = '记忆'
+  drawerBody.replaceChildren()
+  drawer.hidden = false
+
+  let data
+  try {
+    const res = await fetch('/memory')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    data = await res.json()
+  } catch (error) {
+    const pre = el('pre')
+    pre.textContent = `读取记忆失败：${error instanceof Error ? error.message : String(error)}`
+    drawerBody.append(pre)
+    return
+  }
+
+  drawerTitle.textContent = `记忆 · rev ${data.rev} · 约 ${data.tokens} token`
+  const legend = el('div', 'memory-legend')
+  legend.textContent = '显示 = 每轮进入上下文；隐藏 = 只留标题和条数，需要 memory_read。'
+  drawerBody.append(legend)
+  renderSectionList(data.sections)
 }
 
 function compactNewlines(text) {
@@ -530,6 +562,7 @@ function section(title, body) {
 }
 
 drawerClose.addEventListener('click', () => { drawer.hidden = true })
+personaBtn.addEventListener('click', openPersona)
 memoryBtn.addEventListener('click', openMemory)
 
 const events = new EventSource('/events')
