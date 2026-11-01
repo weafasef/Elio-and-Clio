@@ -9,6 +9,7 @@
     "node": ">=22.6"
   },
   "scripts": {
+    "postinstall": "node desktop/patch-uiohook.cjs",
     "ping": "node scripts/ping.ts",
     "start": "node src/main.ts",
     "desktop": "electron ."
