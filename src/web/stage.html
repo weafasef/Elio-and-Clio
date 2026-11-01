@@ -954,6 +954,16 @@ if (petMode && petBridge) {
   if (petBridge?.onUiState) {
     petBridge.onUiState(state => {
       autoClickThrough = state?.clickThrough !== false
+      if (typeof state?.scale === 'number' && state.scale >= 70 && state.scale <= 115) {
+        const rounded = Math.round(state.scale)
+        if (petSizeEl) petSizeEl.value = String(rounded)
+        setPetSizeDisplay(rounded)
+        try {
+          localStorage.setItem('eh.petScale', String(rounded))
+        } catch {
+          // 忽略存储异常
+        }
+      }
       const hideTextControls = state?.showTextAndControls === false
       if (hideTextControls && !document.documentElement.classList.contains('hide-text-controls')) {
         const height = portraitEl?.offsetHeight || Math.round(innerHeight * 0.5)
@@ -1055,6 +1065,11 @@ events.onmessage = event => {
 
   if (data.type === 'volume' && !draggingVolume) {
     setVolumeDisplay(data.volume * 100)
+    return
+  }
+
+  if (data.type === 'body-control' && petMode && petBridge?.applyBodyControl) {
+    void petBridge.applyBodyControl(data.command)
   }
 }
 </script>

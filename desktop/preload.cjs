@@ -45,4 +45,7 @@ contextBridge.exposeInMainWorld('ehPet', {
   retry() {
     ipcRenderer.send('pet:retry')
   },
+  applyBodyControl(command) {
+    return ipcRenderer.invoke('pet:body-control', command)
+  },
 })

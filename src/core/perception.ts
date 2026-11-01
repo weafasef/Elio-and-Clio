@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { formatFirstToken, formatTokenSpeed, readMetrics } from './metrics.ts'
 import { renderSpeechState } from './speech.ts'
 import { readVolume } from './volume.ts'
+import { renderBodyState } from './body.ts'
 
 /** 唤醒来源（这一 step 是被什么开启的） */
 export type WakeSource = '外界消息' | '工具调用' | '工具返回' | '自由活动'
@@ -48,6 +49,7 @@ const DEFAULT_CONFIG: PerceptionConfig = {
     '- 我的备忘录：{{memo}}',
     '- 语音：{{speech}}',
     '- 语音音量：{{volume}}',
+    '- 我的身体：{{body}}',
   ],
 }
 
@@ -95,6 +97,7 @@ function collectValues(input: PerceptionInput): Record<string, string> {
     memo: readMemo(input.dataDir),
     speech: renderSpeechState(),
     volume: formatVolume(readVolume(input.dataDir)),
+    body: renderBodyState(input.dataDir),
     // 外面递进来的最后展开，同名覆盖上面的默认值
     ...input.provided,
   }

@@ -18,6 +18,7 @@ import {
 import { runStep } from '../core/loop.ts'
 import { AsrService } from '../asr/service.ts'
 import { readVolume, writeVolume } from '../core/volume.ts'
+import { readBodyState, subscribeBodyControl, writeBodyState, type BodyState } from '../core/body.ts'
 import { speechSnapshot, subscribeSpeech } from '../core/speech.ts'
 import { dueAlarms, nextAlarmText, readAlarms, removeAlarms } from '../tools/alarms.ts'
 import type { Config } from '../config.ts'
@@ -95,6 +96,14 @@ export function startServer(config: Config): ServerHandle {
     broadcast({
       ...event,
       type: event.type === 'start' ? 'speech-start' : 'speech-end',
+    })
+  })
+
+  // 桌宠身体控制指令推给舞台
+  const unsubscribeBody = subscribeBodyControl(command => {
+    broadcast({
+      type: 'body-control',
+      command,
     })
   })
 
@@ -320,6 +329,49 @@ export function startServer(config: Config): ServerHandle {
       broadcast({ type: 'volume', volume: saved })
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify({ ok: true, volume: saved }))
+      return
+    }
+
+    // 桌宠身体状态（读取与 Electron 同步回报）
+    if (req.method === 'GET' && path === '/body') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify(readBodyState(config.dataDir)))
+      return
+    }
+
+    if (req.method === 'POST' && path === '/body/state') {
+      const body = await readBody(req)
+      let parsed: Record<string, unknown> = {}
+      try {
+        const raw = JSON.parse(body) as unknown
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+          parsed = raw as Record<string, unknown>
+        }
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: '需要 JSON 对象' }))
+        return
+      }
+
+      const patch: Partial<BodyState> = {}
+      if (typeof parsed.visible === 'boolean') patch.visible = parsed.visible
+      if (typeof parsed.x === 'number' && Number.isFinite(parsed.x)) patch.x = Math.round(parsed.x)
+      if (typeof parsed.y === 'number' && Number.isFinite(parsed.y)) patch.y = Math.round(parsed.y)
+      if (typeof parsed.width === 'number' && Number.isFinite(parsed.width)) patch.width = Math.round(parsed.width)
+      if (typeof parsed.height === 'number' && Number.isFinite(parsed.height)) patch.height = Math.round(parsed.height)
+      if (typeof parsed.scale === 'number' && Number.isFinite(parsed.scale)) patch.scale = Math.round(parsed.scale)
+      if (typeof parsed.screenWidth === 'number' && Number.isFinite(parsed.screenWidth)) patch.screenWidth = Math.round(parsed.screenWidth)
+      if (typeof parsed.screenHeight === 'number' && Number.isFinite(parsed.screenHeight)) patch.screenHeight = Math.round(parsed.screenHeight)
+      if (typeof parsed.showText === 'boolean') patch.showText = parsed.showText
+      if (typeof parsed.showComposer === 'boolean') patch.showComposer = parsed.showComposer
+      if (typeof parsed.clickThrough === 'boolean') patch.clickThrough = parsed.clickThrough
+
+      const requestId = typeof parsed.requestId === 'number' && Number.isInteger(parsed.requestId)
+        ? parsed.requestId
+        : undefined
+      const saved = writeBodyState(config.dataDir, patch, requestId)
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ ok: true, state: saved }))
       return
     }
 
@@ -572,6 +624,7 @@ export function startServer(config: Config): ServerHandle {
   return {
     close: async () => {
       unsubscribeSpeech()
+      unsubscribeBody()
       if (timer) clearTimeout(timer)
       for (const client of clients) client.end()
       clients.clear()

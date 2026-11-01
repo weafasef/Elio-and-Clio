@@ -50,6 +50,8 @@ let screenshotDone = false
 let dragState = null
 let dragTimer = null
 let dragSafety = null
+let smoothMoveTimer = null
+let currentScalePercent = 70
 let registeredShortcuts = {}
 let shortcutErrors = []
 let presenceWatchTimer = null
@@ -238,13 +240,18 @@ function createWindow() {
       console.log('[pet] always on top:', win.isAlwaysOnTop())
       console.log('[pet] dock visible:', process.platform === 'darwin' ? app.dock.isVisible() : 'n/a')
     }
+    reportBodyState()
     captureForDebug()
   })
 
-  win.on('show', rebuildTrayMenu)
+  win.on('show', () => {
+    rebuildTrayMenu()
+    reportBodyState()
+  })
   win.on('hide', () => {
     endWindowDrag()
     rebuildTrayMenu()
+    reportBodyState()
   })
 
   win.on('blur', endWindowDrag)
@@ -499,12 +506,13 @@ function saveSettings() {
   }
 }
 
-function sendUiState() {
+function sendUiState(includeScale = false) {
   if (!win || win.isDestroyed()) return
   win.webContents.send('pet:ui-state', {
     showTextAndControls: settings.showTextAndControls,
     showComposer: settings.showComposer,
     clickThrough: settings.clickThrough,
+    ...(includeScale ? { scale: currentScalePercent } : {}),
   })
 }
 
@@ -517,8 +525,207 @@ function applyMouseIgnore() {
   }
 }
 
+function cancelSmoothMove() {
+  if (smoothMoveTimer) {
+    clearInterval(smoothMoveTimer)
+    smoothMoveTimer = null
+  }
+}
+
+function animateWindowPosition(targetX, targetY, durationMs = 300) {
+  if (!win || win.isDestroyed()) return
+  cancelSmoothMove()
+
+  const [startX, startY] = win.getPosition()
+  const dx = Math.round(targetX) - startX
+  const dy = Math.round(targetY) - startY
+  if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) {
+    win.setPosition(Math.round(targetX), Math.round(targetY), false)
+    return
+  }
+
+  const startedAt = Date.now()
+  smoothMoveTimer = setInterval(() => {
+    if (!win || win.isDestroyed() || dragState) {
+      cancelSmoothMove()
+      return
+    }
+    const elapsed = Date.now() - startedAt
+    const t = Math.min(1, elapsed / Math.max(1, durationMs))
+    const eased = 1 - Math.pow(1 - t, 3)
+    const nextX = Math.round(startX + dx * eased)
+    const nextY = Math.round(startY + dy * eased)
+    win.setPosition(nextX, nextY, false)
+    if (t >= 1) {
+      cancelSmoothMove()
+      reportBodyState()
+    }
+  }, 16)
+}
+
+function clampPartiallyVisible(x, y, width, height, workArea) {
+  const minVisible = 80
+  const minX = workArea.x - width + minVisible
+  const maxX = workArea.x + workArea.width - minVisible
+  const minY = workArea.y - height + minVisible
+  const maxY = workArea.y + workArea.height - minVisible
+  return {
+    x: Math.round(Math.max(minX, Math.min(maxX, x))),
+    y: Math.round(Math.max(minY, Math.min(maxY, y))),
+  }
+}
+
+function computePresetPosition(preset, bounds, workArea) {
+  const margin = 24
+  const { width, height } = bounds
+  switch (preset) {
+    case 'bottom-right':
+      return {
+        x: workArea.x + workArea.width - width - margin,
+        y: workArea.y + workArea.height - height - margin,
+      }
+    case 'bottom-left':
+      return {
+        x: workArea.x + margin,
+        y: workArea.y + workArea.height - height - margin,
+      }
+    case 'top-right':
+      return {
+        x: workArea.x + workArea.width - width - margin,
+        y: workArea.y + margin,
+      }
+    case 'top-left':
+      return {
+        x: workArea.x + margin,
+        y: workArea.y + margin,
+      }
+    case 'center':
+      return {
+        x: workArea.x + Math.round((workArea.width - width) / 2),
+        y: workArea.y + Math.round((workArea.height - height) / 2),
+      }
+    case 'peek-right':
+      return {
+        x: workArea.x + workArea.width - Math.round(width * 0.45),
+        y: bounds.y,
+      }
+    case 'peek-left':
+      return {
+        x: workArea.x - Math.round(width * 0.55),
+        y: bounds.y,
+      }
+    default:
+      return { x: bounds.x, y: bounds.y }
+  }
+}
+
+function reportBodyState(requestId, overrideBounds) {
+  if (!win || win.isDestroyed()) return
+  const bounds = overrideBounds ? { ...win.getBounds(), ...overrideBounds } : win.getBounds()
+  const { workArea } = screen.getPrimaryDisplay()
+  const payload = {
+    ...(typeof requestId === 'number' ? { requestId } : {}),
+    visible: Boolean(win.isVisible() && !windowHiddenByUser),
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width: Math.round(bounds.width),
+    height: Math.round(bounds.height),
+    scale: Math.round(currentScalePercent),
+    screenWidth: Math.round(workArea.width),
+    screenHeight: Math.round(workArea.height),
+    showText: settings.showTextAndControls !== false,
+    showComposer: settings.showComposer !== false,
+    clickThrough: settings.clickThrough !== false,
+  }
+  void fetch(`${STAGE_ORIGIN}/body/state`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(1_500),
+  }).catch(() => {
+    // 后端未就绪或短暂断开时忽略
+  })
+}
+
+function applyBodyControl(command) {
+  if (!command || typeof command !== 'object') return
+  if (!win || win.isDestroyed()) createWindow()
+  if (!win || win.isDestroyed()) return
+
+  let uiChanged = false
+  if (typeof command.showText === 'boolean') {
+    settings.showTextAndControls = command.showText
+    uiChanged = true
+  }
+  if (typeof command.showComposer === 'boolean') {
+    settings.showComposer = command.showComposer
+    uiChanged = true
+  }
+
+  if (typeof command.scale === 'number' && Number.isFinite(command.scale)) {
+    setWindowScale(command.scale)
+    uiChanged = true
+  }
+
+  if (uiChanged) {
+    saveSettings()
+    sendUiState(true)
+    rebuildTrayMenu()
+  }
+
+  if (typeof command.visible === 'boolean') {
+    if (command.visible) {
+      windowHiddenByUser = false
+      restoreWindowPresence()
+    } else {
+      windowHiddenByUser = true
+      cancelSmoothMove()
+      win.hide()
+    }
+    rebuildTrayMenu()
+  }
+
+  const bounds = win.getBounds()
+  const { workArea } = screen.getPrimaryDisplay()
+  let targetX = bounds.x
+  let targetY = bounds.y
+  let hasPositionChange = false
+
+  if (typeof command.preset === 'string') {
+    const pos = computePresetPosition(command.preset, bounds, workArea)
+    targetX = pos.x
+    targetY = pos.y
+    hasPositionChange = true
+  }
+  if (typeof command.x === 'number' && Number.isFinite(command.x)) {
+    targetX = Math.round(command.x)
+    hasPositionChange = true
+  }
+  if (typeof command.y === 'number' && Number.isFinite(command.y)) {
+    targetY = Math.round(command.y)
+    hasPositionChange = true
+  }
+  if (typeof command.dx === 'number' && Number.isFinite(command.dx)) {
+    targetX += Math.round(command.dx)
+    hasPositionChange = true
+  }
+  if (typeof command.dy === 'number' && Number.isFinite(command.dy)) {
+    targetY += Math.round(command.dy)
+    hasPositionChange = true
+  }
+
+  if (hasPositionChange) {
+    const clamped = clampPartiallyVisible(targetX, targetY, bounds.width, bounds.height, workArea)
+    reportBodyState(command.requestId, { x: clamped.x, y: clamped.y })
+    animateWindowPosition(clamped.x, clamped.y, 300)
+  } else {
+    reportBodyState(command.requestId)
+  }
+}
+
 function startWindowDrag() {
   if (!win || dragState) return
+  cancelSmoothMove()
   const cursor = screen.getCursorScreenPoint()
   const [x, y] = win.getPosition()
   dragState = { cursorX: cursor.x, cursorY: cursor.y, x, y }
@@ -553,6 +760,7 @@ function endWindowDrag() {
   if (dragState) {
     dragState = null
     if (process.env.EH_PET_DEBUG) console.log('[pet] drag end')
+    reportBodyState()
   }
 }
 
@@ -560,6 +768,7 @@ function setWindowScale(percent) {
   if (!win) return
   const factor = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number(percent) / 100))
   if (!Number.isFinite(factor)) return
+  currentScalePercent = Math.round(factor * 100)
 
   const old = win.getBounds()
   const width = old.width
@@ -570,10 +779,12 @@ function setWindowScale(percent) {
   if (process.env.EH_PET_DEBUG) {
     console.log('[pet] size:', percent, { x, y, width, height })
   }
+  reportBodyState()
 }
 
 function resetWindowPosition() {
   if (!win) return
+  cancelSmoothMove()
   const { workArea } = screen.getPrimaryDisplay()
   const [width, height] = win.getSize()
   const x = Math.max(workArea.x, workArea.x + workArea.width - width - 24)
@@ -581,6 +792,7 @@ function resetWindowPosition() {
   win.setPosition(Math.round(x), Math.round(y), false)
   windowHiddenByUser = false
   restoreWindowPresence()
+  reportBodyState()
 }
 
 function toggleClickThrough() {
@@ -589,6 +801,7 @@ function toggleClickThrough() {
   sendUiState()
   applyMouseIgnore()
   rebuildTrayMenu()
+  reportBodyState()
 }
 
 function toggleTextControls() {
@@ -596,6 +809,7 @@ function toggleTextControls() {
   saveSettings()
   sendUiState()
   rebuildTrayMenu()
+  reportBodyState()
 }
 
 function toggleComposer() {
@@ -603,6 +817,7 @@ function toggleComposer() {
   saveSettings()
   sendUiState()
   rebuildTrayMenu()
+  reportBodyState()
 }
 
 function unregisterAllShortcuts() {
@@ -1078,6 +1293,12 @@ ipcMain.on('pet:voice-state', (event, state) => {
 ipcMain.on('pet:retry', event => {
   if (!win || event.sender !== win.webContents) return
   loadStage()
+})
+
+ipcMain.handle('pet:body-control', (event, command) => {
+  if (win && event.sender !== win.webContents) return false
+  applyBodyControl(command)
+  return true
 })
 
 ipcMain.handle('pet:request-microphone', async () => {
