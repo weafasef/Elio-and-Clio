@@ -49,8 +49,7 @@ export function saveTrace(dataDir: string, record: TraceRecord): void {
   appendFileSync(file, JSON.stringify(record) + '\n', 'utf8')
 }
 
-/** 按 step + loop 找一条记录（从后往前找，最近的优先）；找不到返回 null */
-export function findTrace(dataDir: string, step: number, loop: number): TraceRecord | null {
+/** 按 step + loop 找一条记录（从后往前找，最近的优先）；找不到返回 null */export function findTrace(dataDir: string, step: number, loop: number): TraceRecord | null {
   let raw: string
   try {
     raw = readFileSync(traceFile(dataDir), 'utf8')
@@ -65,6 +64,28 @@ export function findTrace(dataDir: string, step: number, loop: number): TraceRec
     try {
       const record = JSON.parse(line) as TraceRecord
       if (record.step === step && record.loop === loop) return record
+    } catch {
+      // 跳过坏行
+    }
+  }
+  return null
+}
+
+/** 最后一条成功写入的 trace；没有返回 null */
+export function readLatestTrace(dataDir: string): TraceRecord | null {
+  let raw: string
+  try {
+    raw = readFileSync(traceFile(dataDir), 'utf8')
+  } catch {
+    return null
+  }
+
+  const lines = raw.split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!.trim()
+    if (!line) continue
+    try {
+      return JSON.parse(line) as TraceRecord
     } catch {
       // 跳过坏行
     }

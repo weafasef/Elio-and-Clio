@@ -59,6 +59,9 @@ async function synthesize(text: string, config: TtsConfig, dir: string): Promise
     text,
     format: config.format ?? 'mp3',
     latency: config.latency ?? 'normal',
+    temperature: config.temperature ?? 0.6,
+    top_p: config.topP ?? 0.6,
+    repetition_penalty: config.repetitionPenalty ?? 1.3,
     ...(config.referenceId ? { reference_id: config.referenceId } : {}),
     ...(config.model ? { model: config.model } : {}),
   }

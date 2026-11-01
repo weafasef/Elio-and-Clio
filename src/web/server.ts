@@ -1,11 +1,11 @@
 import { createServer } from 'node:http'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { appendHistory, deleteHistoryLoop, nextStep, readHistory, renderEntries } from '../core/history.ts'
 import type { EntryInput } from '../core/history.ts'
-import { findTrace } from '../core/trace.ts'
+import { findTrace, readLatestTrace } from '../core/trace.ts'
 import {
   buildTree,
   normalizeLines,
@@ -65,6 +65,36 @@ function flattenTree(
     flattenTree(node.children, depth + 1, rows)
   }
   return rows
+}
+
+type LatestImage = {
+  url: string
+  at?: string
+  width?: number
+  height?: number
+  source?: string
+}
+
+/** 当前感知里的图片；文件不存在时返回 null */
+function readLatestImageInfo(dataDir: string): LatestImage | null {
+  if (!existsSync(join(dataDir, 'screenshots', 'latest.jpg'))) return null
+
+  const info: LatestImage = { url: '/perception/image' }
+  try {
+    const meta = JSON.parse(readFileSync(join(dataDir, 'screenshots', 'latest.json'), 'utf8')) as {
+      at?: unknown
+      width?: unknown
+      height?: unknown
+      source?: unknown
+    }
+    if (typeof meta.at === 'string') info.at = meta.at
+    if (typeof meta.width === 'number') info.width = Math.round(meta.width)
+    if (typeof meta.height === 'number') info.height = Math.round(meta.height)
+    if (meta.source === 'camera' || meta.source === 'screen') info.source = meta.source
+  } catch {
+    // 没有元数据也能看图片
+  }
+  return info
 }
 
 export type ServerHandle = {
@@ -459,6 +489,47 @@ export function startServer(config: Config): ServerHandle {
         fileTokens,
         sections: flattenTree(buildPersonaTree(lines, content)),
       }))
+      return
+    }
+
+    // 最近一次感知：最后一条 trace 的文字 + 当前画面
+    if (req.method === 'GET' && path === '/perception') {
+      const record = readLatestTrace(config.dataDir)
+      if (!record) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: '还没有感知记录' }))
+        return
+      }
+
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+      })
+      res.end(JSON.stringify({
+        t: record.t,
+        step: record.step,
+        loop: record.loop,
+        text: record.perception,
+        image: readLatestImageInfo(config.dataDir),
+      }))
+      return
+    }
+
+    // 感知里的图片
+    if (req.method === 'GET' && path === '/perception/image') {
+      let image: Buffer
+      try {
+        image = readFileSync(join(config.dataDir, 'screenshots', 'latest.jpg'))
+      } catch {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+        res.end('没有图片')
+        return
+      }
+      res.writeHead(200, {
+        'Content-Type': 'image/jpeg',
+        'Cache-Control': 'no-store',
+      })
+      res.end(image)
       return
     }
 

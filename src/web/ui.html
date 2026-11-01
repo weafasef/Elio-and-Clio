@@ -261,6 +261,15 @@
   .memory-source.确定 { color: #9ece6a; }
   .memory-source.猜想 { color: #e0af68; }
   .memory-empty { padding: 4px 0; color: var(--dim); font-size: 12px; }
+  .perception-image {
+    display: block;
+    max-width: 100%;
+    margin: 6px 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    cursor: zoom-in;
+  }
+  .perception-caption { margin: 0 0 6px; color: var(--dim); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -268,6 +277,7 @@
   <h1>EH</h1>
   <span id="state">连接中…</span>
   <div class="header-actions">
+    <button id="perception-btn" class="header-btn" type="button">感知</button>
     <button id="persona-btn" class="header-btn" type="button">人格</button>
     <button id="memory-btn" class="header-btn" type="button">记忆</button>
     <a class="stage-link" href="/stage" target="_blank" rel="noreferrer">舞台 ↗</a>
@@ -303,6 +313,7 @@ const drawerTitle = document.getElementById('drawer-title')
 const drawerBody = document.getElementById('drawer-body')
 const drawerClose = document.getElementById('drawer-close')
 const stopBtn = document.getElementById('stop')
+const perceptionBtn = document.getElementById('perception-btn')
 const personaBtn = document.getElementById('persona-btn')
 const memoryBtn = document.getElementById('memory-btn')
 
@@ -499,6 +510,54 @@ function renderSectionList(sections) {
   }
 }
 
+async function openPerception() {
+  drawerTitle.textContent = '感知'
+  drawerBody.replaceChildren()
+  drawer.hidden = false
+
+  let data
+  try {
+    const res = await fetch('/perception')
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`)
+    data = payload
+  } catch (error) {
+    const pre = el('pre')
+    pre.textContent = `读取感知失败：${error instanceof Error ? error.message : String(error)}`
+    drawerBody.append(pre)
+    return
+  }
+
+  drawerTitle.textContent = `感知 · step ${data.step} · loop ${data.loop} · ${data.t}`
+  const legend = el('div', 'memory-legend')
+  legend.textContent = '这是她最后一次请求时看到的感知缓存。'
+  drawerBody.append(legend)
+
+  const pre = el('pre')
+  pre.textContent = data.text
+  drawerBody.append(pre)
+
+  if (!data.image) return
+
+  const parts = []
+  if (data.image.at) parts.push(data.image.at)
+  if (data.image.width && data.image.height) parts.push(`${data.image.width}×${data.image.height}`)
+  const caption = el('div', 'perception-caption')
+  caption.textContent = `${data.image.source === 'camera' ? '照片' : '截图'}${parts.length ? ' · ' + parts.join(' · ') : ''}`
+  drawerBody.append(caption)
+
+  const link = document.createElement('a')
+  link.href = data.image.url + '?t=' + Date.now()
+  link.target = '_blank'
+  link.rel = 'noreferrer'
+  const image = document.createElement('img')
+  image.className = 'perception-image'
+  image.src = link.href
+  image.alt = '感知图片'
+  link.append(image)
+  drawerBody.append(link)
+}
+
 async function openPersona() {
   drawerTitle.textContent = '人格'
   drawerBody.replaceChildren()
@@ -562,6 +621,7 @@ function section(title, body) {
 }
 
 drawerClose.addEventListener('click', () => { drawer.hidden = true })
+perceptionBtn.addEventListener('click', openPerception)
 personaBtn.addEventListener('click', openPersona)
 memoryBtn.addEventListener('click', openMemory)
 

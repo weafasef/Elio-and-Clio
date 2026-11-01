@@ -10,6 +10,9 @@ export type TtsConfig = {
   model?: string
   format?: string
   latency?: string
+  temperature?: number
+  topP?: number
+  repetitionPenalty?: number
   proxyUrl?: string
 }
 
